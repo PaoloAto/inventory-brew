@@ -1,15 +1,18 @@
 import { Chip, IconButton, TableCell, TableRow, Tooltip } from '@mui/material'
 import RestaurantIcon from '@mui/icons-material/Restaurant'
 import VisibilityIcon from '@mui/icons-material/Visibility'
+import EditIcon from '@mui/icons-material/Edit'
 import type { Recipe } from '../../types/recipe'
 
 interface RecipeRowProps {
   recipe: Recipe
   computeCostPerServing: (ingredients: Recipe['ingredients']) => number
   onCook: () => void
+  onView: () => void
+  onEdit: () => void
 }
 
-export const RecipeRow = ({ recipe, computeCostPerServing, onCook }: RecipeRowProps) => {
+export const RecipeRow = ({ recipe, computeCostPerServing, onCook, onView, onEdit }: RecipeRowProps) => {
   const cost = computeCostPerServing(recipe.ingredients)
   const margin = recipe.sellingPrice - cost
   const marginPercent = recipe.sellingPrice ? (margin / recipe.sellingPrice) * 100 : 0
@@ -36,8 +39,13 @@ export const RecipeRow = ({ recipe, computeCostPerServing, onCook }: RecipeRowPr
 
       <TableCell align="center">
         <Tooltip title="View details">
-          <IconButton size="small" sx={{ mr: 1 }}>
+          <IconButton size="small" sx={{ mr: 1 }} onClick={onView}>
             <VisibilityIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Edit">
+          <IconButton size="small" sx={{ mr: 1 }} onClick={onEdit}>
+            <EditIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Cook">

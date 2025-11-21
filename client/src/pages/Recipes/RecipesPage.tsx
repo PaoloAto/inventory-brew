@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Dialog,
@@ -7,58 +8,48 @@ import {
   DialogContent,
   DialogTitle,
   Paper,
+  Snackbar,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
 import type { Recipe, RecipeIngredient } from '../../types/recipe'
 import { RecipeTable } from '../../components/recipes/RecipeTable'
-
-const MOCK_INGREDIENT_COSTS: Record<string, number> = {
-  'ing-1': 2000,
-  'ing-2': 1500,
-  'ing-3': 1000,
-}
-
-const MOCK_RECIPES: Recipe[] = [
-  {
-    id: 'r-1',
-    name: 'Chicken Pasta',
-    description: 'Creamy pasta with grilled chicken.',
-    sellingPrice: 320,
-    isActive: true,
-    ingredients: [
-      { ingredientId: 'ing-1', quantity: 1, unit: 'pcs' },
-      { ingredientId: 'ing-2', quantity: 0.5, unit: 'kg' },
-    ],
-  },
-  {
-    id: 'r-2',
-    name: 'Garden Salad',
-    description: 'Fresh mixed greens with vinaigrette.',
-    sellingPrice: 180,
-    isActive: true,
-    ingredients: [
-      { ingredientId: 'ing-2', quantity: 0.2, unit: 'kg' },
-      { ingredientId: 'ing-3', quantity: 0.1, unit: 'kg' },
-    ],
-  },
-]
+import { RecipeDialog } from '../../components/recipes/RecipeDialog'
+import { RecipeDetailsDialog } from '../../components/recipes/RecipeDetailsDialog'
+import { mockRecipes } from '../../mock/recipes'
+import { ingredientCostMap, mockIngredients } from '../../mock/ingredients'
 
 function computeCostPerServing(ingredients: RecipeIngredient[]): number {
   return ingredients.reduce((sum, ri) => {
-    const costPerUnit = MOCK_INGREDIENT_COSTS[ri.ingredientId] ?? 0
+    const costPerUnit = ingredientCostMap[ri.ingredientId] ?? 0
     return sum + costPerUnit * ri.quantity
   }, 0)
 }
 
 export const RecipesPage = () => {
   const [search, setSearch] = useState('')
-  const [recipes] = useState<Recipe[]>(MOCK_RECIPES)
+  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes)
 
   const [cookOpen, setCookOpen] = useState(false)
   const [cookServings, setCookServings] = useState(1)
   const [recipeToCook, setRecipeToCook] = useState<Recipe | null>(null)
+
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<Recipe | null>(null)
+
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [viewing, setViewing] = useState<Recipe | null>(null)
+
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  })
+
+  const getCostPerUnit = (ingredientId: string) => ingredientCostMap[ingredientId] ?? 0
+  const getIngredientName = (ingredientId: string) =>
+    mockIngredients.find((ing) => ing.id === ingredientId)?.name ?? ingredientId
 
   const filtered = useMemo(
     () => recipes.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())),
@@ -71,6 +62,43 @@ export const RecipesPage = () => {
     setCookOpen(true)
   }
 
+  const handleOpenAdd = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const handleOpenEdit = (recipe: Recipe) => {
+    setEditing(recipe)
+    setDialogOpen(true)
+  }
+
+  const handleSave = (input: Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean }) => {
+    if (input.id) {
+      setRecipes((prev) => prev.map((r) => (r.id === input.id ? { ...r, ...input } : r)))
+      setSnackbar({ open: true, severity: 'success', message: 'Recipe updated' })
+    } else {
+      const newRecipe: Recipe = {
+        ...input,
+        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+        isActive: true,
+      }
+      setRecipes((prev) => [...prev, newRecipe])
+      setSnackbar({ open: true, severity: 'success', message: 'Recipe added' })
+    }
+    setDialogOpen(false)
+    setEditing(null)
+  }
+
+  const handleOpenDetails = (recipe: Recipe) => {
+    setViewing(recipe)
+    setDetailsOpen(true)
+  }
+
+  const handleCloseDetails = () => {
+    setViewing(null)
+    setDetailsOpen(false)
+  }
+
   const handleCloseCook = () => {
     setCookOpen(false)
     setRecipeToCook(null)
@@ -79,7 +107,7 @@ export const RecipesPage = () => {
   const handleConfirmCook = () => {
     if (!recipeToCook) return
     // Stub for now; later call backend /recipes/:id/cook
-    console.info(`Cook ${cookServings} servings of`, recipeToCook.name)
+    setSnackbar({ open: true, severity: 'info', message: `Cooked ${cookServings} servings of ${recipeToCook.name}` })
     handleCloseCook()
   }
 
@@ -125,13 +153,17 @@ export const RecipesPage = () => {
               onChange={(e) => setSearch(e.target.value)}
               sx={{ maxWidth: 300 }}
             />
-            <Button variant="contained">Add Recipe</Button>
+            <Button variant="contained" onClick={handleOpenAdd}>
+              Add Recipe
+            </Button>
           </Stack>
 
           <RecipeTable
             recipes={filtered}
             computeCostPerServing={computeCostPerServing}
             onCook={handleOpenCook}
+            onView={handleOpenDetails}
+            onEdit={handleOpenEdit}
           />
         </Box>
       </Paper>
@@ -157,6 +189,38 @@ export const RecipesPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <RecipeDialog
+        open={dialogOpen}
+        initialData={editing ?? undefined}
+        availableIngredients={mockIngredients}
+        onClose={() => setDialogOpen(false)}
+        onSave={handleSave}
+      />
+
+      <RecipeDetailsDialog
+        open={detailsOpen}
+        recipe={viewing}
+        onClose={handleCloseDetails}
+        computeCostPerServing={computeCostPerServing}
+        getCostPerUnit={getCostPerUnit}
+        getIngredientName={getIngredientName}
+      />
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={2500}
+        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          severity={snackbar.severity}
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

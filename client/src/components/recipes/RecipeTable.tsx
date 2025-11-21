@@ -6,9 +6,11 @@ interface RecipeTableProps {
   recipes: Recipe[]
   computeCostPerServing: (ingredients: Recipe['ingredients']) => number
   onCook: (recipe: Recipe) => void
+  onView: (recipe: Recipe) => void
+  onEdit: (recipe: Recipe) => void
 }
 
-export const RecipeTable = ({ recipes, computeCostPerServing, onCook }: RecipeTableProps) => {
+export const RecipeTable = ({ recipes, computeCostPerServing, onCook, onView, onEdit }: RecipeTableProps) => {
   return (
     <Table size="small">
       <TableHead>
@@ -29,6 +31,8 @@ export const RecipeTable = ({ recipes, computeCostPerServing, onCook }: RecipeTa
             recipe={recipe}
             computeCostPerServing={computeCostPerServing}
             onCook={() => onCook(recipe)}
+            onView={() => onView(recipe)}
+            onEdit={() => onEdit(recipe)}
           />
         ))}
       </TableBody>

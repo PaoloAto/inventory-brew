@@ -41,7 +41,8 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
           zIndex: (theme) => theme.zIndex.drawer + 1,
           borderBottom: 1,
           borderColor: 'divider',
-          bgcolor: 'background.paper',
+          bgcolor: 'rgba(255,255,255,0.9)',
+          backdropFilter: 'blur(8px)',
         }}
       >
         <Toolbar sx={{ justifyContent: 'space-between' }}>

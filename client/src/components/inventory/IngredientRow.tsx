@@ -1,5 +1,5 @@
-import { Chip, Checkbox, IconButton, TableCell, TableRow } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
+import { Chip, Checkbox, IconButton, TableCell, TableRow } from '@mui/material'
 import type { Ingredient } from '../../types/ingredient'
 
 interface IngredientRowProps {

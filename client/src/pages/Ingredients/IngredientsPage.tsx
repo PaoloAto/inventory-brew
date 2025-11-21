@@ -13,43 +13,11 @@ import {
 import type { Ingredient } from '../../types/ingredient'
 import { IngredientTable } from '../../components/inventory/IngredientTable'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
-
-const MOCK_INGREDIENTS: Ingredient[] = [
-  {
-    id: '1',
-    name: 'Carrot',
-    manufacturer: 'Fresh Farms',
-    unit: 'pcs',
-    stockQuantity: 30,
-    costPerUnit: 3.5,
-    reorderLevel: 10,
-    isActive: true,
-  },
-  {
-    id: '2',
-    name: 'Chicken Breast',
-    manufacturer: 'Poultry Co.',
-    unit: 'g',
-    stockQuantity: 5000,
-    costPerUnit: 0.12,
-    reorderLevel: 1200,
-    isActive: true,
-  },
-  {
-    id: '3',
-    name: 'Olive Oil',
-    manufacturer: 'Mediterranea',
-    unit: 'ml',
-    stockQuantity: 3200,
-    costPerUnit: 0.03,
-    reorderLevel: 600,
-    isActive: true,
-  },
-]
+import { mockIngredients } from '../../mock/ingredients'
 
 export const IngredientsPage = () => {
   const [search, setSearch] = useState('')
-  const [ingredients, setIngredients] = useState<Ingredient[]>(MOCK_INGREDIENTS)
+  const [ingredients, setIngredients] = useState<Ingredient[]>(mockIngredients)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Ingredient | null>(null)
