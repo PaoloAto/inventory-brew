@@ -1,0 +1,93 @@
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: #0d6efd;
+  color: #fff;
+}
+
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.navbar-brand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #fff;
+}
+
+.navbar-links {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.navbar-link {
+  color: #dfe9ff;
+  font-size: 0.95rem;
+}
+
+.navbar-link.active {
+  color: #fff;
+  font-weight: 600;
+}
+
+.navbar-dropdown {
+  position: relative;
+}
+
+.navbar-dropdown:hover .navbar-dropdown-menu {
+  display: block;
+}
+
+.navbar-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 120%;
+  left: 0;
+  background: #fff;
+  color: #333;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  min-width: 150px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+}
+
+.navbar-dropdown-item {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  color: #333;
+}
+
+.navbar-dropdown-item:hover {
+  background: #f4f6fb;
+  color: #0d6efd;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.navbar-hello {
+  font-style: italic;
+  color: #dfe9ff;
+}
+
+.navbar-signout {
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #fff;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+}
+
+.navbar-signout:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
