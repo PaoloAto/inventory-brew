@@ -3,7 +3,7 @@ import {
   Alert,
   Box,
   Button,
-  Paper,
+  Chip,
   Snackbar,
   Stack,
   TableContainer,
@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { Ingredient } from '../../types/ingredient'
+import { GradientCard } from '../../components/ui/GradientCard'
 import { IngredientTable } from '../../components/inventory/IngredientTable'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
 import { mockIngredients } from '../../mock/ingredients'
@@ -85,69 +86,58 @@ export const IngredientsPage = () => {
         Ingredients
       </Typography>
 
-      <Paper
-        elevation={3}
-        sx={{
-          borderRadius: 3,
-          overflow: 'hidden',
-        }}
+      <GradientCard
+        title="Ingredients Inventory"
+        subtitle="Track stock, costs, and low-level alerts in one place."
+        rightContent={
+          <Chip
+            label={`${filtered.length} shown / ${ingredients.length} total`}
+            size="small"
+            variant="outlined"
+            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
+          />
+        }
       >
-        <Box
-          sx={{
-            px: 3,
-            py: 2,
-            background: 'linear-gradient(to right, #1A73E8, #42A5F5)',
-            color: 'common.white',
-          }}
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          justifyContent="space-between"
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          mb={2}
         >
-          <Typography variant="h6">Ingredients Inventory</Typography>
-          <Typography variant="body2" sx={{ opacity: 0.9 }}>
-            Track your restaurant stock levels and ingredient costs.
-          </Typography>
-        </Box>
+          <TextField
+            size="small"
+            label="Search ingredient"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ maxWidth: 320 }}
+          />
+          <Button variant="contained" onClick={openAddDialog}>
+            Add Ingredient
+          </Button>
+        </Stack>
 
-        <Box sx={{ p: 3 }}>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={2}
-            justifyContent="space-between"
-            alignItems={{ xs: 'stretch', sm: 'center' }}
-            mb={2}
+        <TableContainer>
+          <IngredientTable
+            ingredients={filtered}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
+            onEdit={openEditDialog}
+          />
+        </TableContainer>
+
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+          <Button
+            variant="outlined"
+            color="error"
+            disabled={selectedIds.length === 0}
+            onClick={handleDeleteSelected}
           >
-            <TextField
-              size="small"
-              label="Search ingredient"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ maxWidth: 300 }}
-            />
-            <Button variant="contained" onClick={openAddDialog}>
-              Add Ingredient
-            </Button>
-          </Stack>
-
-          <TableContainer>
-            <IngredientTable
-              ingredients={filtered}
-              selectedIds={selectedIds}
-              onToggleSelect={handleToggleSelect}
-              onToggleSelectAll={handleToggleSelectAll}
-              onEdit={openEditDialog}
-            />
-          </TableContainer>
-
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-            <Button
-              variant="outlined"
-              color="error"
-              disabled={selectedIds.length === 0}
-              onClick={handleDeleteSelected}
-            >
-              Delete selected
-            </Button>
-          </Box>
+            Delete selected
+          </Button>
         </Box>
-      </Paper>
+      </GradientCard>
 
       <IngredientDialog open={dialogOpen} initialData={editing ?? undefined} onClose={() => setDialogOpen(false)} onSave={handleSave} />
 

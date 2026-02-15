@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Box, Paper, Typography } from '@mui/material'
 
 type Accent = 'primary' | 'success' | 'error' | 'info'

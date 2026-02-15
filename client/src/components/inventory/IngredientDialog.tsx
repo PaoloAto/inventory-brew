@@ -86,7 +86,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
       <DialogTitle>{mode} Ingredient</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
-          <Grid item xs={12} sm={8}>
+          <Grid size={{ xs: 12, sm: 8 }}>
             <TextField
               label="Name"
               value={values.name}
@@ -96,7 +96,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
               helperText={errors.name}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               select
               label="Unit"
@@ -114,7 +114,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
             </TextField>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               label="Manufacturer"
               value={values.manufacturer ?? ''}
@@ -122,7 +122,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
               fullWidth
             />
           </Grid>
-          <Grid item xs={12} sm={6}>
+          <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               label="Category"
               value={values.category ?? ''}
@@ -131,7 +131,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
             />
           </Grid>
 
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
               label="Stock Quantity"
@@ -143,7 +143,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
               inputProps={{ min: 0 }}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
               label="Cost per Unit"
@@ -155,7 +155,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
               inputProps={{ min: 0, step: 0.01 }}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
               label="Reorder Level"

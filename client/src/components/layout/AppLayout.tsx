@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   AppBar,
+  Avatar,
   Box,
   Drawer,
   List,
@@ -16,7 +17,7 @@ import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu'
 import { NavLink, useLocation } from 'react-router-dom'
 import './layout.css'
 
-const drawerWidth = 220
+const drawerWidth = 232
 
 interface AppLayoutProps {
   children: ReactNode
@@ -36,22 +37,24 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
       <AppBar
         position="fixed"
         elevation={0}
-        color="default"
+        color="transparent"
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          borderBottom: 1,
-          borderColor: 'divider',
+          borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
           bgcolor: 'rgba(255,255,255,0.9)',
-          backdropFilter: 'blur(8px)',
+          backdropFilter: 'blur(14px)',
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between' }}>
-          <Typography variant="h6" noWrap>
+        <Toolbar sx={{ justifyContent: 'space-between', px: 2.5 }}>
+          <Typography variant="h6" noWrap sx={{ fontWeight: 700 }}>
             Inventory Brew
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Hello, Chef
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+            <Typography variant="body2" color="text.secondary">
+              Hello, Chef
+            </Typography>
+            <Avatar sx={{ width: 32, height: 32, fontSize: 13, bgcolor: 'primary.main' }}>IB</Avatar>
+          </Box>
         </Toolbar>
       </AppBar>
 
@@ -63,14 +66,15 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
           '& .MuiDrawer-paper': {
             width: drawerWidth,
             boxSizing: 'border-box',
-            bgcolor: '#1f1f2d',
+            borderRight: 'none',
+            bgcolor: '#10141f',
             color: '#fff',
-            backgroundImage: 'linear-gradient(180deg, #1f1f2d 0%, #101018 100%)',
+            backgroundImage: 'linear-gradient(180deg, #10141f 0%, #060a12 100%)',
           },
         }}
       >
         <Toolbar />
-        <List sx={{ mt: 1 }}>
+        <List sx={{ mt: 1.5 }}>
           {navItems.map((item) => {
             const selected = location.pathname === item.to
             return (
@@ -78,23 +82,26 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
                 key={item.to}
                 component={NavLink}
                 to={item.to}
-                selected={selected}
                 sx={{
-                  mx: 1,
-                  borderRadius: 2,
-                  color: '#fff',
-                  '&.Mui-selected': {
-                    bgcolor: 'primary.main',
-                    color: 'primary.contrastText',
+                  mx: 1.25,
+                  mb: 0.75,
+                  borderRadius: 99,
+                  color: selected ? 'common.white' : '#c9d1df',
+                  background: selected ? 'linear-gradient(90deg, #1A73E8, #42A5F5)' : 'transparent',
+                  '&.active': {
+                    color: 'common.white',
+                    background: 'linear-gradient(90deg, #1A73E8, #42A5F5)',
                     '& .MuiListItemIcon-root': { color: 'inherit' },
                   },
                   '&:hover': {
-                    bgcolor: 'rgba(255,255,255,0.08)',
+                    bgcolor: selected ? undefined : 'rgba(255,255,255,0.08)',
                   },
+                  transition: 'all 150ms ease',
+                  '&:active': { transform: 'scale(0.98)' },
                 }}
               >
-                <ListItemIcon sx={{ color: '#cfd4dc', minWidth: 36 }}>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
+                <ListItemIcon sx={{ color: selected ? 'white' : '#8e99ab', minWidth: 36 }}>{item.icon}</ListItemIcon>
+                <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14, fontWeight: 500 }} />
               </ListItemButton>
             )
           })}
@@ -106,7 +113,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         sx={{
           flexGrow: 1,
           p: 3,
-          mt: 8,
+          mt: 9,
           ml: `${drawerWidth}px`,
           minHeight: '100vh',
         }}

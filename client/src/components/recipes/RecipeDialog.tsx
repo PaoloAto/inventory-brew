@@ -106,7 +106,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
       <DialogTitle>{mode} Recipe</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
-          <Grid item xs={12} sm={8}>
+          <Grid size={{ xs: 12, sm: 8 }}>
             <TextField
               label="Name"
               value={values.name}
@@ -116,7 +116,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
               helperText={errors.name}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
               label="Selling Price"
@@ -128,7 +128,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
               inputProps={{ min: 0, step: 0.01 }}
             />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField
               label="Description"
               value={values.description ?? ''}
@@ -145,8 +145,8 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
         </Typography>
         <Grid container spacing={1.5}>
           {values.ingredients.map((ri, idx) => (
-            <Grid container item spacing={1.5} key={idx}>
-              <Grid item xs={12} sm={5}>
+            <Grid container spacing={1.5} key={idx}>
+              <Grid size={{ xs: 12, sm: 5 }}>
                 <TextField
                   select
                   label="Ingredient"
@@ -163,7 +163,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid size={{ xs: 6, sm: 3 }}>
                 <TextField
                   type="number"
                   label="Quantity"
@@ -175,7 +175,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
                   inputProps={{ min: 0, step: 0.01 }}
                 />
               </Grid>
-              <Grid item xs={4} sm={2}>
+              <Grid size={{ xs: 4, sm: 2 }}>
                 <TextField
                   select
                   label="Unit"
@@ -190,14 +190,17 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={2} sm={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <Grid
+                size={{ xs: 2, sm: 2 }}
+                sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
+              >
                 <IconButton color="error" onClick={() => removeIngredientRow(idx)}>
                   <DeleteOutlineIcon />
                 </IconButton>
               </Grid>
             </Grid>
           ))}
-          <Grid item xs={12}>
+          <Grid size={12}>
             <Button startIcon={<AddIcon />} onClick={addIngredientRow}>
               Add ingredient row
             </Button>

@@ -3,11 +3,11 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Paper,
   Snackbar,
   Stack,
   TextField,
@@ -17,6 +17,7 @@ import type { Recipe, RecipeIngredient } from '../../types/recipe'
 import { RecipeTable } from '../../components/recipes/RecipeTable'
 import { RecipeDialog } from '../../components/recipes/RecipeDialog'
 import { RecipeDetailsDialog } from '../../components/recipes/RecipeDetailsDialog'
+import { GradientCard } from '../../components/ui/GradientCard'
 import { mockRecipes } from '../../mock/recipes'
 import { ingredientCostMap, mockIngredients } from '../../mock/ingredients'
 
@@ -117,56 +118,45 @@ export const RecipesPage = () => {
         Recipes
       </Typography>
 
-      <Paper
-        elevation={3}
-        sx={{
-          borderRadius: 3,
-          overflow: 'hidden',
-        }}
-      >
-        <Box
-          sx={{
-            px: 3,
-            py: 2,
-            background: 'linear-gradient(to right, #1A73E8, #42A5F5)',
-            color: 'common.white',
-          }}
-        >
-          <Typography variant="h6">Recipe Book</Typography>
-          <Typography variant="body2" sx={{ opacity: 0.9 }}>
-            Link recipes to ingredients and see cost & margin per serving.
-          </Typography>
-        </Box>
-
-        <Box sx={{ p: 3 }}>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={2}
-            justifyContent="space-between"
-            alignItems={{ xs: 'stretch', sm: 'center' }}
-            mb={2}
-          >
-            <TextField
-              size="small"
-              label="Search recipe"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ maxWidth: 300 }}
-            />
-            <Button variant="contained" onClick={handleOpenAdd}>
-              Add Recipe
-            </Button>
-          </Stack>
-
-          <RecipeTable
-            recipes={filtered}
-            computeCostPerServing={computeCostPerServing}
-            onCook={handleOpenCook}
-            onView={handleOpenDetails}
-            onEdit={handleOpenEdit}
+      <GradientCard
+        title="Recipe Book"
+        subtitle="Link recipes to ingredient costs and estimate margins instantly."
+        rightContent={
+          <Chip
+            label={`${filtered.length} shown / ${recipes.length} total`}
+            size="small"
+            variant="outlined"
+            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
           />
-        </Box>
-      </Paper>
+        }
+      >
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          justifyContent="space-between"
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          mb={2}
+        >
+          <TextField
+            size="small"
+            label="Search recipe"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ maxWidth: 320 }}
+          />
+          <Button variant="contained" onClick={handleOpenAdd}>
+            Add Recipe
+          </Button>
+        </Stack>
+
+        <RecipeTable
+          recipes={filtered}
+          computeCostPerServing={computeCostPerServing}
+          onCook={handleOpenCook}
+          onView={handleOpenDetails}
+          onEdit={handleOpenEdit}
+        />
+      </GradientCard>
 
       <Dialog open={cookOpen} onClose={handleCloseCook} maxWidth="xs" fullWidth>
         <DialogTitle>{recipeToCook ? `Cook "${recipeToCook.name}"` : 'Cook Recipe'}</DialogTitle>
