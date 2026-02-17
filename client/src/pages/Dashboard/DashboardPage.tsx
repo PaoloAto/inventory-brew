@@ -1,16 +1,19 @@
-import type { ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Inventory2RoundedIcon from '@mui/icons-material/Inventory2Rounded'
 import LocalDiningRoundedIcon from '@mui/icons-material/LocalDiningRounded'
 import MonetizationOnRoundedIcon from '@mui/icons-material/MonetizationOnRounded'
-import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
+import SyncAltRoundedIcon from '@mui/icons-material/SyncAltRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Avatar,
   Box,
   Chip,
+  CircularProgress,
   Divider,
   Grid,
-  LinearProgress,
+  List,
+  ListItem,
+  ListItemText,
   Stack,
   Table,
   TableBody,
@@ -19,15 +22,16 @@ import {
   TableRow,
   Typography,
 } from '@mui/material'
+import { getDashboardSummary, type DashboardSummaryResponse } from '../../api/dashboard'
+import { getErrorMessage } from '../../api/error'
 import { GradientCard } from '../../components/ui/GradientCard'
-import { computeTotalStockValue, mockIngredients } from '../../mock/ingredients'
-import { mockRecipes } from '../../mock/recipes'
+import { useAppSnackbar } from '../../context/snackbarContext'
 
 interface MetricCardProps {
   title: string
   value: string
   subtitle: string
-  icon: ReactNode
+  icon: React.ReactNode
   accent: string
 }
 
@@ -77,36 +81,61 @@ const MetricCard = ({ title, value, subtitle, icon, accent }: MetricCardProps) =
   )
 }
 
+const formatDateTime = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
 export const DashboardPage = () => {
-  const totalIngredients = mockIngredients.length
-  const totalRecipes = mockRecipes.length
-  const totalStockValue = computeTotalStockValue(mockIngredients)
+  const { showSnackbar } = useAppSnackbar()
 
-  const ingredientsWithMetrics = mockIngredients.map((ing) => {
-    const stockValue = ing.stockQuantity * ing.costPerUnit
-    const reorderLevel = ing.reorderLevel ?? 0
-    const healthRatio = reorderLevel > 0 ? (ing.stockQuantity / reorderLevel) * 100 : 100
-    return {
-      ...ing,
-      stockValue,
-      reorderLevel,
-      healthRatio,
+  const [data, setData] = useState<DashboardSummaryResponse | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  const loadSummary = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const response = await getDashboardSummary({
+        lowStockLimit: 6,
+        recentTransactionsLimit: 8,
+        includeRelated: true,
+      })
+      setData(response)
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to load dashboard summary'), { severity: 'error' })
+    } finally {
+      setIsLoading(false)
     }
-  })
+  }, [showSnackbar])
 
-  const lowStock = ingredientsWithMetrics.filter((ing) => ing.reorderLevel > 0 && ing.stockQuantity < ing.reorderLevel)
-  const watchList = [...ingredientsWithMetrics]
-    .sort((a, b) => a.healthRatio - b.healthRatio)
-    .slice(0, Math.min(4, ingredientsWithMetrics.length))
-  const topValueItems = [...ingredientsWithMetrics]
-    .sort((a, b) => b.stockValue - a.stockValue)
-    .slice(0, Math.min(5, ingredientsWithMetrics.length))
+  useEffect(() => {
+    void loadSummary()
+  }, [loadSummary])
 
-  const averageIngredientCost = totalIngredients > 0 ? totalStockValue / totalIngredients : 0
-  const healthScore = Math.round(
-    ingredientsWithMetrics.reduce((acc, item) => acc + Math.min(item.healthRatio, 140), 0) /
-      Math.max(ingredientsWithMetrics.length, 1),
-  )
+  const healthScore = useMemo(() => {
+    if (!data) return 0
+    const { ingredientCount, lowStockCount } = data.summary
+    if (ingredientCount === 0) return 100
+    return Math.max(0, Math.round(((ingredientCount - lowStockCount) / ingredientCount) * 100))
+  }, [data])
+
+  if (isLoading && !data) {
+    return (
+      <Stack alignItems="center" justifyContent="center" sx={{ py: 10 }}>
+        <CircularProgress size={32} />
+      </Stack>
+    )
+  }
+
+  const summary = data?.summary ?? {
+    ingredientCount: 0,
+    recipeCount: 0,
+    lowStockCount: 0,
+    totalStockValue: 0,
+  }
+  const lowStockItems = data?.lowStockItems ?? []
+  const recentTransactions = data?.recentTransactions ?? []
 
   return (
     <Box sx={{ pb: 2 }}>
@@ -116,13 +145,13 @@ export const DashboardPage = () => {
             Inventory Command Center
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Live snapshot of ingredient health, value concentration, and operational risk.
+            Live snapshot from your backend inventory data.
           </Typography>
         </Box>
         <Chip
-          icon={<TrendingUpRoundedIcon fontSize="small" />}
+          icon={<SyncAltRoundedIcon fontSize="small" />}
           label={`Health Score ${healthScore}%`}
-          color={healthScore >= 100 ? 'success' : 'warning'}
+          color={healthScore >= 80 ? 'success' : healthScore >= 60 ? 'warning' : 'error'}
           variant="outlined"
           sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, fontWeight: 600, px: 0.6 }}
         />
@@ -132,7 +161,7 @@ export const DashboardPage = () => {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <MetricCard
             title="Ingredients"
-            value={`${totalIngredients}`}
+            value={`${summary.ingredientCount}`}
             subtitle="Tracked inventory items"
             icon={<Inventory2RoundedIcon fontSize="small" />}
             accent="linear-gradient(145deg, #1A73E8, #56A8FF)"
@@ -141,7 +170,7 @@ export const DashboardPage = () => {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <MetricCard
             title="Total Stock Value"
-            value={totalStockValue.toFixed(2)}
+            value={summary.totalStockValue.toFixed(2)}
             subtitle="Current on-hand valuation"
             icon={<MonetizationOnRoundedIcon fontSize="small" />}
             accent="linear-gradient(145deg, #00ACC1, #42A5F5)"
@@ -150,8 +179,8 @@ export const DashboardPage = () => {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <MetricCard
             title="Low Stock Alerts"
-            value={`${lowStock.length}`}
-            subtitle={lowStock.length === 0 ? 'No urgent replenishment' : 'Needs replenishment'}
+            value={`${summary.lowStockCount}`}
+            subtitle={summary.lowStockCount === 0 ? 'No urgent replenishment' : 'Needs replenishment'}
             icon={<WarningAmberRoundedIcon fontSize="small" />}
             accent="linear-gradient(145deg, #EA4335, #FF6B6B)"
           />
@@ -159,7 +188,7 @@ export const DashboardPage = () => {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <MetricCard
             title="Active Recipes"
-            value={`${totalRecipes}`}
+            value={`${summary.recipeCount}`}
             subtitle="Linked to ingredients"
             icon={<LocalDiningRoundedIcon fontSize="small" />}
             accent="linear-gradient(145deg, #2CA24D, #19C160)"
@@ -168,90 +197,12 @@ export const DashboardPage = () => {
       </Grid>
 
       <Grid container spacing={2.4}>
-        <Grid size={{ xs: 12, xl: 8 }}>
-          <GradientCard
-            title="Stock Health Matrix"
-            subtitle="Stock level versus reorder threshold"
-            accent="primary"
-            rightContent={
-              <Chip
-                size="small"
-                label={`${watchList.length} monitored`}
-                variant="outlined"
-                sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.6)' }}
-              />
-            }
-          >
-            <Stack spacing={2.2}>
-              {watchList.map((item) => {
-                const progressValue = Math.max(0, Math.min(item.healthRatio, 160))
-                const chipColor =
-                  item.healthRatio < 100 ? 'error' : item.healthRatio < 130 ? 'warning' : 'success'
-                return (
-                  <Box key={item.id}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.7}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {item.name}
-                      </Typography>
-                      <Stack direction="row" spacing={0.8} alignItems="center">
-                        <Typography variant="caption" color="text.secondary">
-                          {item.stockQuantity} {item.unit}
-                        </Typography>
-                        <Chip size="small" label={`${Math.round(item.healthRatio)}%`} color={chipColor} />
-                      </Stack>
-                    </Stack>
-                    <LinearProgress
-                      variant="determinate"
-                      value={progressValue}
-                      color={chipColor}
-                      sx={{ height: 9, borderRadius: 99, backgroundColor: 'rgba(148,163,184,0.22)' }}
-                    />
-                  </Box>
-                )
-              })}
-            </Stack>
-          </GradientCard>
-        </Grid>
-
-        <Grid size={{ xs: 12, xl: 4 }}>
-          <GradientCard title="Cost Concentration" subtitle="Highest value ingredients" accent="info">
-            <Stack spacing={1.6}>
-              {topValueItems.map((item) => {
-                const percentage = totalStockValue > 0 ? (item.stockValue / totalStockValue) * 100 : 0
-                return (
-                  <Box key={item.id}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {item.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {item.stockValue.toFixed(2)}
-                      </Typography>
-                    </Stack>
-                    <LinearProgress
-                      variant="determinate"
-                      value={Math.min(percentage, 100)}
-                      color="secondary"
-                      sx={{ height: 8, borderRadius: 99, backgroundColor: 'rgba(15,23,42,0.08)' }}
-                    />
-                  </Box>
-                )
-              })}
-            </Stack>
-          </GradientCard>
-        </Grid>
-
         <Grid size={{ xs: 12, lg: 7 }}>
           <GradientCard title="Low Stock Queue" subtitle="Ingredients that need attention now" accent="error">
-            {lowStock.length === 0 ? (
-              <Stack spacing={1}>
-                <Typography variant="body2" color="text.secondary">
-                  No critical low stock items right now.
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Tip: monitor the health matrix above for ingredients approaching reorder level.
-                </Typography>
-              </Stack>
+            {lowStockItems.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No critical low stock items right now.
+              </Typography>
             ) : (
               <Table size="small">
                 <TableHead>
@@ -263,7 +214,7 @@ export const DashboardPage = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {lowStock.map((item) => (
+                  {lowStockItems.map((item) => (
                     <TableRow key={item.id} hover>
                       <TableCell sx={{ fontWeight: 600 }}>{item.name}</TableCell>
                       <TableCell align="right">
@@ -273,12 +224,7 @@ export const DashboardPage = () => {
                         {item.reorderLevel} {item.unit}
                       </TableCell>
                       <TableCell align="right">
-                        <Chip
-                          size="small"
-                          color="error"
-                          variant="outlined"
-                          label={`${Math.max(item.reorderLevel - item.stockQuantity, 0)} ${item.unit}`}
-                        />
+                        <Chip size="small" color="error" variant="outlined" label={`${item.shortfall} ${item.unit}`} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -289,45 +235,47 @@ export const DashboardPage = () => {
         </Grid>
 
         <Grid size={{ xs: 12, lg: 5 }}>
-          <GradientCard title="Operational Snapshot" subtitle="Quick strategic indicators" accent="success">
-            <Stack spacing={1.6}>
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="body2" color="text.secondary">
-                  Average ingredient value
-                </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {averageIngredientCost.toFixed(2)}
-                </Typography>
-              </Stack>
-              <Divider />
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="body2" color="text.secondary">
-                  Recipes available
-                </Typography>
-                <Chip size="small" label={`${totalRecipes} recipes`} color="primary" variant="outlined" />
-              </Stack>
-              <Divider />
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="body2" color="text.secondary">
-                  Stock coverage
-                </Typography>
-                <Chip
-                  size="small"
-                  label={lowStock.length === 0 ? 'Healthy' : 'Watch closely'}
-                  color={lowStock.length === 0 ? 'success' : 'warning'}
-                  variant="outlined"
-                />
-              </Stack>
-              <Divider />
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="body2" color="text.secondary">
-                  Portfolio mix
-                </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {totalIngredients} ingredients / {totalRecipes} recipes
-                </Typography>
-              </Stack>
-            </Stack>
+          <GradientCard title="Recent Transactions" subtitle="Latest inventory movements" accent="info">
+            {recentTransactions.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No transaction history yet.
+              </Typography>
+            ) : (
+              <List dense sx={{ p: 0 }}>
+                {recentTransactions.map((transaction) => (
+                  <Fragment key={transaction._id}>
+                    <ListItem disableGutters sx={{ py: 1.1 }}>
+                      <ListItemText
+                        primary={
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {transaction.ingredient?.name ?? transaction.ingredientId}
+                            </Typography>
+                            <Chip
+                              size="small"
+                              label={transaction.type}
+                              color={transaction.type === 'IN' ? 'success' : transaction.type === 'OUT' ? 'warning' : 'default'}
+                            />
+                          </Stack>
+                        }
+                        secondary={
+                          <>
+                            <Typography component="span" variant="caption" color="text.secondary">
+                              {transaction.reason || 'No reason'}
+                            </Typography>
+                            <br />
+                            <Typography component="span" variant="caption" color="text.secondary">
+                              {formatDateTime(transaction.createdAt)}
+                            </Typography>
+                          </>
+                        }
+                      />
+                    </ListItem>
+                    <Divider component="li" />
+                  </Fragment>
+                ))}
+              </List>
+            )}
           </GradientCard>
         </Grid>
       </Grid>

@@ -1,0 +1,484 @@
+{
+  "info": {
+    "_postman_id": "8f8c4a6d-5b65-47f1-96b5-0d0b8ab4a040",
+    "name": "Inventory Brew - Ingredients API",
+    "description": "Postman collection for the current Ingredients backend (inventory, stock adjustments, transactions, soft delete/restore, and validation checks).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Ingredient",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "var json = pm.response.json();",
+              "if (json && json._id) {",
+              "  pm.collectionVariables.set('ingredientId', json._id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Carrot\",\n  \"manufacturer\": \"Fresh Farms\",\n  \"category\": \"Vegetable\",\n  \"unit\": \"pcs\",\n  \"stockQuantity\": 50,\n  \"costPerUnit\": 3.5,\n  \"reorderLevel\": 20\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Ingredients (Default)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients?page=1&limit=10&sortBy=name&sortOrder=asc",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "sortBy",
+              "value": "name"
+            },
+            {
+              "key": "sortOrder",
+              "value": "asc"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Ingredients (Search)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients?search=carrot",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ],
+          "query": [
+            {
+              "key": "search",
+              "value": "carrot"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Ingredients (Low Stock Only)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients?lowStockOnly=true",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ],
+          "query": [
+            {
+              "key": "lowStockOnly",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Ingredients (Category)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients?category=Vegetable",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ],
+          "query": [
+            {
+              "key": "category",
+              "value": "Vegetable"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Ingredient By ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Adjust Stock (IN)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"IN\",\n  \"quantity\": 10,\n  \"reason\": \"Purchase delivery\",\n  \"unitCost\": 3.6\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/adjust-stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "adjust-stock"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Adjust Stock (OUT)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"OUT\",\n  \"quantity\": 8,\n  \"reason\": \"Kitchen usage\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/adjust-stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "adjust-stock"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Adjust Stock (ADJUST absolute)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"ADJUST\",\n  \"newStockQuantity\": 40,\n  \"reason\": \"Physical recount\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/adjust-stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "adjust-stock"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Adjust Stock (Insufficient - Expected 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"OUT\",\n  \"quantity\": 99999,\n  \"reason\": \"Negative stock guard test\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/adjust-stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "adjust-stock"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Ingredient Transactions",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/transactions?page=1&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "transactions"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Ingredient (Valid)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"manufacturer\": \"Fresh Farms Co.\",\n  \"costPerUnit\": 3.75,\n  \"reorderLevel\": 25\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Ingredient (Invalid stockQuantity - Expected 400)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"stockQuantity\": 999\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Soft Delete Ingredient",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Inactive Ingredients",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients?onlyInactive=true",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ],
+          "query": [
+            {
+              "key": "onlyInactive",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Restore Ingredient",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ingredients/{{ingredientId}}/restore",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients",
+            "{{ingredientId}}",
+            "restore"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Ingredient (Invalid payload - Expected 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"\",\n  \"unit\": \"box\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api"
+    },
+    {
+      "key": "ingredientId",
+      "value": ""
+    }
+  ]
+}

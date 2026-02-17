@@ -19,6 +19,7 @@ import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import Inventory2Icon from '@mui/icons-material/Inventory2'
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu'
+import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded'
 import { NavLink, useLocation } from 'react-router-dom'
 import './layout.css'
 
@@ -39,6 +40,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
       { label: 'Dashboard', icon: <DashboardIcon />, to: '/' },
       { label: 'Ingredients', icon: <Inventory2Icon />, to: '/ingredients' },
       { label: 'Recipes', icon: <RestaurantMenuIcon />, to: '/recipes' },
+      { label: 'Transactions', icon: <ReceiptLongRoundedIcon />, to: '/transactions' },
     ],
     [],
   )

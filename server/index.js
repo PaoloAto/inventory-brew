@@ -1,29 +1,65 @@
 require('dotenv').config()
-const express = require('express')
-const cors = require('cors')
+const http = require('http')
 const mongoose = require('mongoose')
-
-const ingredientRoutes = require('./routes/ingredients')
-
-const app = express()
-
-app.use(express.json())
-app.use(cors())
+const app = require('./app')
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/inventory-brew'
+const PORT = Number(process.env.PORT) || 5000
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err.message))
+let server
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'Inventory Brew API' })
+const startServer = async () => {
+  try {
+    await mongoose.connect(MONGO_URI)
+    console.log('Connected to MongoDB')
+
+    server = http.createServer(app)
+    server.listen(PORT, () => {
+      console.log(`Server listening on port ${PORT}`)
+    })
+  } catch (err) {
+    console.error('Startup failed:', err.message)
+    process.exit(1)
+  }
+}
+
+const shutdown = async (signal) => {
+  console.log(`Received ${signal}. Shutting down gracefully...`)
+
+  try {
+    if (server) {
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) return reject(err)
+          return resolve()
+        })
+      })
+    }
+
+    await mongoose.connection.close()
+    console.log('Server and database connections closed.')
+    process.exit(0)
+  } catch (err) {
+    console.error('Error during shutdown:', err.message)
+    process.exit(1)
+  }
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT')
 })
 
-app.use('/api/ingredients', ingredientRoutes)
-
-const PORT = process.env.PORT || 5000
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`)
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM')
 })
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason)
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error)
+  void shutdown('uncaughtException')
+})
+
+void startServer()

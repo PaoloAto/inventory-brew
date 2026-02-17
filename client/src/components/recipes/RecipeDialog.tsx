@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Button,
   Dialog,
@@ -28,36 +28,31 @@ interface RecipeDialogProps {
 
 const UNITS: Unit[] = ['pcs', 'g', 'kg', 'ml', 'l']
 
-const blankIngredient: RecipeIngredient = { ingredientId: '', quantity: 0, unit: 'pcs' }
+const createBlankIngredient = (): RecipeIngredient => ({ ingredientId: '', quantity: 0, unit: 'pcs' })
 
-export const RecipeDialog = ({ open, initialData, availableIngredients, onClose, onSave }: RecipeDialogProps) => {
-  const [values, setValues] = useState<RecipeInput>({
+const getInitialValues = (initialData?: Recipe | null): RecipeInput => {
+  if (initialData) {
+    return { ...initialData }
+  }
+
+  return {
     id: '',
     name: '',
     description: '',
     sellingPrice: 0,
-    ingredients: [blankIngredient],
+    ingredients: [createBlankIngredient()],
     isActive: true,
-  })
+  }
+}
+
+export const RecipeDialog = ({ open, initialData, availableIngredients, onClose, onSave }: RecipeDialogProps) => {
+  const [values, setValues] = useState<RecipeInput>(() => getInitialValues(initialData))
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    if (open) {
-      if (initialData) {
-        setValues({ ...initialData })
-      } else {
-        setValues({
-          id: '',
-          name: '',
-          description: '',
-          sellingPrice: 0,
-          ingredients: [blankIngredient],
-          isActive: true,
-        })
-      }
-      setErrors({})
-    }
-  }, [open, initialData])
+  const handleReset = () => {
+    setValues(getInitialValues(initialData))
+    setErrors({})
+  }
 
   const handleChange = (field: keyof RecipeInput, value: unknown) => {
     setValues((prev) => ({ ...prev, [field]: value as never }))
@@ -72,13 +67,13 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
   }
 
   const addIngredientRow = () => {
-    setValues((prev) => ({ ...prev, ingredients: [...prev.ingredients, { ...blankIngredient }] }))
+    setValues((prev) => ({ ...prev, ingredients: [...prev.ingredients, createBlankIngredient()] }))
   }
 
   const removeIngredientRow = (index: number) => {
     setValues((prev) => {
       const next = prev.ingredients.filter((_, idx) => idx !== index)
-      return { ...prev, ingredients: next.length > 0 ? next : [{ ...blankIngredient }] }
+      return { ...prev, ingredients: next.length > 0 ? next : [createBlankIngredient()] }
     })
   }
 
@@ -102,7 +97,13 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
   const mode = initialData ? 'Edit' : 'Add'
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      TransitionProps={{ onEnter: handleReset }}
+    >
       <DialogTitle>{mode} Recipe</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>

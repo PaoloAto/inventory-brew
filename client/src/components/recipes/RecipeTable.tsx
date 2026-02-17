@@ -2,7 +2,7 @@ import { Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, Typog
 import type { Recipe } from '../../types/recipe'
 import { RecipeRow } from './RecipeRow'
 
-export type RecipeSortField = 'name' | 'sellingPrice' | 'costPerServing' | 'margin' | 'ingredientCount'
+export type RecipeSortField = 'name' | 'sellingPrice'
 export type SortOrder = 'asc' | 'desc'
 export type RecipeColumnKey =
   | 'name'
@@ -69,37 +69,13 @@ export const RecipeTable = ({
             </TableCell>
           )}
           {isVisible('costPerServing') && (
-            <TableCell align="right" sortDirection={sortBy === 'costPerServing' ? sortOrder : false}>
-              <TableSortLabel
-                active={sortBy === 'costPerServing'}
-                direction={sortBy === 'costPerServing' ? sortOrder : 'asc'}
-                onClick={() => onRequestSort('costPerServing')}
-              >
-                Cost / Serving
-              </TableSortLabel>
-            </TableCell>
+            <TableCell align="right">Cost / Serving</TableCell>
           )}
           {isVisible('margin') && (
-            <TableCell align="right" sortDirection={sortBy === 'margin' ? sortOrder : false}>
-              <TableSortLabel
-                active={sortBy === 'margin'}
-                direction={sortBy === 'margin' ? sortOrder : 'asc'}
-                onClick={() => onRequestSort('margin')}
-              >
-                Margin
-              </TableSortLabel>
-            </TableCell>
+            <TableCell align="right">Margin</TableCell>
           )}
           {isVisible('ingredientCount') && (
-            <TableCell align="center" sortDirection={sortBy === 'ingredientCount' ? sortOrder : false}>
-              <TableSortLabel
-                active={sortBy === 'ingredientCount'}
-                direction={sortBy === 'ingredientCount' ? sortOrder : 'asc'}
-                onClick={() => onRequestSort('ingredientCount')}
-              >
-                Ingredients
-              </TableSortLabel>
-            </TableCell>
+            <TableCell align="center">Ingredients</TableCell>
           )}
           {isVisible('actions') && <TableCell align="center">Action</TableCell>}
         </TableRow>

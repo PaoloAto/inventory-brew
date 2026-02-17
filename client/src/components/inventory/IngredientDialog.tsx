@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Button,
   Dialog,
@@ -22,8 +22,12 @@ interface IngredientDialogProps {
 
 const UNITS: Unit[] = ['pcs', 'g', 'kg', 'ml', 'l']
 
-export const IngredientDialog = ({ open, initialData, onClose, onSave }: IngredientDialogProps) => {
-  const [values, setValues] = useState<IngredientInput>({
+const getInitialValues = (initialData?: Ingredient | null): IngredientInput => {
+  if (initialData) {
+    return { ...initialData }
+  }
+
+  return {
     id: '',
     name: '',
     manufacturer: '',
@@ -33,29 +37,17 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
     reorderLevel: 0,
     category: '',
     isActive: true,
-  })
+  }
+}
+
+export const IngredientDialog = ({ open, initialData, onClose, onSave }: IngredientDialogProps) => {
+  const [values, setValues] = useState<IngredientInput>(() => getInitialValues(initialData))
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    if (open) {
-      if (initialData) {
-        setValues({ ...initialData })
-      } else {
-        setValues({
-          id: '',
-          name: '',
-          manufacturer: '',
-          unit: 'pcs',
-          stockQuantity: 0,
-          costPerUnit: 0,
-          reorderLevel: 0,
-          category: '',
-          isActive: true,
-        })
-      }
-      setErrors({})
-    }
-  }, [open, initialData])
+  const handleReset = () => {
+    setValues(getInitialValues(initialData))
+    setErrors({})
+  }
 
   const handleChange = (field: keyof IngredientInput, value: string | number) => {
     setValues((prev) => ({ ...prev, [field]: value }))
@@ -82,7 +74,13 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
   const mode = initialData ? 'Edit' : 'Add'
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleReset }}
+    >
       <DialogTitle>{mode} Ingredient</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>

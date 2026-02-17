@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -13,26 +14,35 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import type { Recipe, RecipeIngredient } from '../../types/recipe'
+import { useSearchParams } from 'react-router-dom'
+import { getErrorMessage } from '../../api/error'
+import { listIngredients } from '../../api/ingredients'
+import {
+  cookRecipe,
+  createRecipe,
+  getRecipeDetails,
+  listRecipes,
+  type RecipeDetails,
+  updateRecipe,
+} from '../../api/recipes'
+import { RecipeDetailsDialog } from '../../components/recipes/RecipeDetailsDialog'
+import { RecipeDialog } from '../../components/recipes/RecipeDialog'
 import {
   RecipeTable,
   type RecipeColumnKey,
   type RecipeSortField,
   type SortOrder,
 } from '../../components/recipes/RecipeTable'
-import { RecipeDialog } from '../../components/recipes/RecipeDialog'
-import { RecipeDetailsDialog } from '../../components/recipes/RecipeDetailsDialog'
 import { GradientCard } from '../../components/ui/GradientCard'
 import {
   TableViewControls,
   type TableColumnOption,
   type TableDensity,
 } from '../../components/ui/TableViewControls'
-import { useAppSnackbar } from '../../context/AppSnackbarContext'
-import { mockRecipes } from '../../mock/recipes'
-import { ingredientCostMap, mockIngredients } from '../../mock/ingredients'
-
-type MarginFilter = 'all' | 'high' | 'medium' | 'low'
+import { useAppSnackbar } from '../../context/snackbarContext'
+import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import type { Ingredient } from '../../types/ingredient'
+import type { Recipe, RecipeIngredient } from '../../types/recipe'
 
 const recipeColumnOptions: Array<TableColumnOption<RecipeColumnKey>> = [
   { key: 'name', label: 'Recipe', locked: true },
@@ -45,25 +55,40 @@ const recipeColumnOptions: Array<TableColumnOption<RecipeColumnKey>> = [
 ]
 
 const defaultRecipeColumns = recipeColumnOptions.map((column) => column.key)
-
-function computeCostPerServing(ingredients: RecipeIngredient[]): number {
-  return ingredients.reduce((sum, ri) => {
-    const costPerUnit = ingredientCostMap[ri.ingredientId] ?? 0
-    return sum + costPerUnit * ri.quantity
-  }, 0)
+const recipeSortFieldMap: Record<RecipeSortField, 'name' | 'sellingPrice'> = {
+  name: 'name',
+  sellingPrice: 'sellingPrice',
 }
 
-const getMarginPercent = (recipe: Recipe) => {
-  const cost = computeCostPerServing(recipe.ingredients)
-  if (!recipe.sellingPrice) return 0
-  return ((recipe.sellingPrice - cost) / recipe.sellingPrice) * 100
+const parsePositiveInt = (value: string | null, fallback: number) => {
+  if (!value) return fallback
+  const parsed = Number.parseInt(value, 10)
+  return Number.isNaN(parsed) || parsed < 1 ? fallback : parsed
+}
+
+const parseSortOrder = (value: string | null): SortOrder => {
+  return value === 'desc' ? 'desc' : 'asc'
+}
+
+const parseSortField = (value: string | null): RecipeSortField => {
+  return value === 'sellingPrice' ? 'sellingPrice' : 'name'
 }
 
 export const RecipesPage = () => {
   const { showSnackbar } = useAppSnackbar()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [search, setSearch] = useState('')
-  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes)
+  const initialSearch = searchParams.get('q') ?? ''
+  const initialSortBy = parseSortField(searchParams.get('sortBy'))
+  const initialSortOrder = parseSortOrder(searchParams.get('sortOrder'))
+  const initialRowsPerPage = parsePositiveInt(searchParams.get('rows'), 10)
+  const initialPage = Math.max(parsePositiveInt(searchParams.get('page'), 1) - 1, 0)
+
+  const [searchInput, setSearchInput] = useState(initialSearch)
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [totalRecipes, setTotalRecipes] = useState(0)
+  const [availableIngredients, setAvailableIngredients] = useState<Ingredient[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   const [cookOpen, setCookOpen] = useState(false)
   const [cookServings, setCookServings] = useState(1)
@@ -73,66 +98,96 @@ export const RecipesPage = () => {
   const [editing, setEditing] = useState<Recipe | null>(null)
 
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const [viewing, setViewing] = useState<Recipe | null>(null)
-  const [marginFilter, setMarginFilter] = useState<MarginFilter>('all')
-  const [sortBy, setSortBy] = useState<RecipeSortField>('name')
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [recipeDetails, setRecipeDetails] = useState<RecipeDetails | null>(null)
+
+  const [sortBy, setSortBy] = useState<RecipeSortField>(initialSortBy)
+  const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder)
   const [density, setDensity] = useState<TableDensity>('compact')
   const [visibleColumns, setVisibleColumns] = useState<RecipeColumnKey[]>(defaultRecipeColumns)
-  const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(6)
+  const [page, setPage] = useState(initialPage)
+  const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage)
 
-  const getCostPerUnit = (ingredientId: string) => ingredientCostMap[ingredientId] ?? 0
-  const getIngredientName = (ingredientId: string) =>
-    mockIngredients.find((ing) => ing.id === ingredientId)?.name ?? ingredientId
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 350)
 
-  const filtered = useMemo(() => {
-    return recipes.filter((recipe) => {
-      const matchesSearch = recipe.name.toLowerCase().includes(search.toLowerCase())
-      const marginPercent = getMarginPercent(recipe)
-      const matchesMargin =
-        marginFilter === 'all' ||
-        (marginFilter === 'high' && marginPercent >= 40) ||
-        (marginFilter === 'medium' && marginPercent >= 20 && marginPercent < 40) ||
-        (marginFilter === 'low' && marginPercent < 20)
+  const ingredientCostMap = useMemo(
+    () => Object.fromEntries(availableIngredients.map((ingredient) => [ingredient.id, ingredient.costPerUnit])),
+    [availableIngredients],
+  )
 
-      return matchesSearch && matchesMargin
-    })
-  }, [recipes, search, marginFilter])
+  const computeCostPerServing = useCallback(
+    (ingredients: RecipeIngredient[]) => {
+      return ingredients.reduce((sum, recipeIngredient) => {
+        const costPerUnit = ingredientCostMap[recipeIngredient.ingredientId] ?? 0
+        return sum + costPerUnit * recipeIngredient.quantity
+      }, 0)
+    },
+    [ingredientCostMap],
+  )
 
-  const sorted = useMemo(() => {
-    const sortedData = [...filtered].sort((a, b) => {
-      const costA = computeCostPerServing(a.ingredients)
-      const costB = computeCostPerServing(b.ingredients)
-      const marginA = a.sellingPrice - costA
-      const marginB = b.sellingPrice - costB
-      let result = 0
+  const loadAvailableIngredients = useCallback(async () => {
+    try {
+      const response = await listIngredients({
+        page: 1,
+        limit: 500,
+        includeInactive: false,
+        sortBy: 'name',
+        sortOrder: 'asc',
+      })
+      setAvailableIngredients(response.items)
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to load ingredient catalog'), { severity: 'error' })
+    }
+  }, [showSnackbar])
 
-      if (sortBy === 'name') result = a.name.localeCompare(b.name)
-      if (sortBy === 'sellingPrice') result = a.sellingPrice - b.sellingPrice
-      if (sortBy === 'costPerServing') result = costA - costB
-      if (sortBy === 'margin') result = marginA - marginB
-      if (sortBy === 'ingredientCount') result = a.ingredients.length - b.ingredients.length
+  const loadRecipes = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const response = await listRecipes({
+        page: page + 1,
+        limit: rowsPerPage,
+        includeInactive: false,
+        search: debouncedSearch || undefined,
+        sortBy: recipeSortFieldMap[sortBy],
+        sortOrder,
+      })
 
-      return sortOrder === 'asc' ? result : -result
-    })
+      setRecipes(response.items)
+      setTotalRecipes(response.pagination.total)
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to load recipes'), { severity: 'error' })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [debouncedSearch, page, rowsPerPage, showSnackbar, sortBy, sortOrder])
 
-    return sortedData
-  }, [filtered, sortBy, sortOrder])
+  useEffect(() => {
+    void loadAvailableIngredients()
+  }, [loadAvailableIngredients])
 
-  const paginated = useMemo(() => {
-    const start = page * rowsPerPage
-    return sorted.slice(start, start + rowsPerPage)
-  }, [sorted, page, rowsPerPage])
+  useEffect(() => {
+    void loadRecipes()
+  }, [loadRecipes])
 
   useEffect(() => {
     setPage(0)
-  }, [search, marginFilter, rowsPerPage])
+  }, [debouncedSearch, rowsPerPage])
 
   useEffect(() => {
-    const maxPage = Math.max(Math.ceil(sorted.length / rowsPerPage) - 1, 0)
-    if (page > maxPage) setPage(maxPage)
-  }, [sorted.length, rowsPerPage, page])
+    const nextParams = new URLSearchParams()
+    const trimmedSearch = searchInput.trim()
+
+    if (trimmedSearch) nextParams.set('q', trimmedSearch)
+    if (sortBy !== 'name') nextParams.set('sortBy', sortBy)
+    if (sortOrder !== 'asc') nextParams.set('sortOrder', sortOrder)
+    if (page > 0) nextParams.set('page', String(page + 1))
+    if (rowsPerPage !== 10) nextParams.set('rows', String(rowsPerPage))
+
+    const nextQuery = nextParams.toString()
+    if (nextQuery !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [page, rowsPerPage, searchInput, searchParams, setSearchParams, sortBy, sortOrder])
 
   const handleRequestSort = (field: RecipeSortField) => {
     if (sortBy === field) {
@@ -168,30 +223,53 @@ export const RecipesPage = () => {
     setDialogOpen(true)
   }
 
-  const handleSave = (input: Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean }) => {
-    if (input.id) {
-      setRecipes((prev) => prev.map((recipe) => (recipe.id === input.id ? { ...recipe, ...input } : recipe)))
-      showSnackbar('Recipe updated', { severity: 'success' })
-    } else {
-      const newRecipe: Recipe = {
-        ...input,
-        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-        isActive: true,
+  const handleSave = async (input: Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean }) => {
+    try {
+      if (input.id) {
+        await updateRecipe(input.id, {
+          name: input.name,
+          description: input.description,
+          sellingPrice: input.sellingPrice,
+          ingredients: input.ingredients,
+        })
+        showSnackbar('Recipe updated', { severity: 'success' })
+      } else {
+        await createRecipe({
+          name: input.name,
+          description: input.description,
+          sellingPrice: input.sellingPrice,
+          ingredients: input.ingredients,
+          isActive: true,
+        })
+        showSnackbar('Recipe added', { severity: 'success' })
       }
-      setRecipes((prev) => [...prev, newRecipe])
-      showSnackbar('Recipe added', { severity: 'success' })
+
+      setDialogOpen(false)
+      setEditing(null)
+      await loadRecipes()
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to save recipe'), { severity: 'error' })
     }
-    setDialogOpen(false)
-    setEditing(null)
   }
 
-  const handleOpenDetails = (recipe: Recipe) => {
-    setViewing(recipe)
+  const handleOpenDetails = async (recipe: Recipe) => {
     setDetailsOpen(true)
+    setDetailsLoading(true)
+    setRecipeDetails(null)
+
+    try {
+      const details = await getRecipeDetails(recipe.id)
+      setRecipeDetails(details)
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to load recipe details'), { severity: 'error' })
+      setDetailsOpen(false)
+    } finally {
+      setDetailsLoading(false)
+    }
   }
 
   const handleCloseDetails = () => {
-    setViewing(null)
+    setRecipeDetails(null)
     setDetailsOpen(false)
   }
 
@@ -200,10 +278,20 @@ export const RecipesPage = () => {
     setRecipeToCook(null)
   }
 
-  const handleConfirmCook = () => {
+  const handleConfirmCook = async () => {
     if (!recipeToCook) return
-    showSnackbar(`Cooked ${cookServings} servings of ${recipeToCook.name}`, { severity: 'info' })
-    handleCloseCook()
+
+    try {
+      const result = await cookRecipe(recipeToCook.id, cookServings)
+      showSnackbar(`Cooked ${cookServings} servings of ${recipeToCook.name} (${result.executionMode})`, {
+        severity: 'success',
+      })
+      setCookOpen(false)
+      setRecipeToCook(null)
+      await loadRecipes()
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to cook recipe'), { severity: 'error' })
+    }
   }
 
   return (
@@ -214,10 +302,10 @@ export const RecipesPage = () => {
 
       <GradientCard
         title="Recipe Book"
-        subtitle="Filter by profitability, sort by key metrics, and act quickly."
+        subtitle="Review pricing, cost, and margin with backend-powered pagination."
         rightContent={
           <Chip
-            label={`${filtered.length} filtered / ${recipes.length} total`}
+            label={`${recipes.length} on page / ${totalRecipes} total`}
             size="small"
             variant="outlined"
             sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
@@ -235,8 +323,8 @@ export const RecipesPage = () => {
               <TextField
                 size="small"
                 label="Search recipe"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 sx={{ minWidth: { xs: '100%', sm: 260 } }}
               />
               <Button variant="contained" onClick={handleOpenAdd}>
@@ -254,33 +342,6 @@ export const RecipesPage = () => {
             />
           </Stack>
 
-          <Stack direction="row" spacing={0.9} flexWrap="wrap" useFlexGap>
-            <Chip
-              label="All Margins"
-              color={marginFilter === 'all' ? 'primary' : 'default'}
-              variant={marginFilter === 'all' ? 'filled' : 'outlined'}
-              onClick={() => setMarginFilter('all')}
-            />
-            <Chip
-              label="High Margin"
-              color={marginFilter === 'high' ? 'success' : 'default'}
-              variant={marginFilter === 'high' ? 'filled' : 'outlined'}
-              onClick={() => setMarginFilter('high')}
-            />
-            <Chip
-              label="Medium Margin"
-              color={marginFilter === 'medium' ? 'warning' : 'default'}
-              variant={marginFilter === 'medium' ? 'filled' : 'outlined'}
-              onClick={() => setMarginFilter('medium')}
-            />
-            <Chip
-              label="Low Margin"
-              color={marginFilter === 'low' ? 'error' : 'default'}
-              variant={marginFilter === 'low' ? 'filled' : 'outlined'}
-              onClick={() => setMarginFilter('low')}
-            />
-          </Stack>
-
           <TableContainer
             sx={{
               maxHeight: 460,
@@ -290,24 +351,30 @@ export const RecipesPage = () => {
               backgroundColor: 'rgba(255,255,255,0.72)',
             }}
           >
-            <RecipeTable
-              recipes={paginated}
-              visibleColumns={visibleColumns}
-              tableSize={density === 'compact' ? 'small' : 'medium'}
-              computeCostPerServing={computeCostPerServing}
-              onCook={handleOpenCook}
-              onView={handleOpenDetails}
-              onEdit={handleOpenEdit}
-              sortBy={sortBy}
-              sortOrder={sortOrder}
-              onRequestSort={handleRequestSort}
-            />
+            {isLoading ? (
+              <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
+                <CircularProgress size={28} />
+              </Stack>
+            ) : (
+              <RecipeTable
+                recipes={recipes}
+                visibleColumns={visibleColumns}
+                tableSize={density === 'compact' ? 'small' : 'medium'}
+                computeCostPerServing={computeCostPerServing}
+                onCook={handleOpenCook}
+                onView={handleOpenDetails}
+                onEdit={handleOpenEdit}
+                sortBy={sortBy}
+                sortOrder={sortOrder}
+                onRequestSort={handleRequestSort}
+              />
+            )}
           </TableContainer>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="flex-end">
             <TablePagination
               component="div"
-              count={sorted.length}
+              count={totalRecipes}
               page={page}
               onPageChange={(_event, newPage) => setPage(newPage)}
               rowsPerPage={rowsPerPage}
@@ -346,19 +413,18 @@ export const RecipesPage = () => {
       <RecipeDialog
         open={dialogOpen}
         initialData={editing ?? undefined}
-        availableIngredients={mockIngredients}
+        availableIngredients={availableIngredients}
         onClose={() => setDialogOpen(false)}
         onSave={handleSave}
       />
 
       <RecipeDetailsDialog
         open={detailsOpen}
-        recipe={viewing}
+        details={recipeDetails}
+        loading={detailsLoading}
         onClose={handleCloseDetails}
-        computeCostPerServing={computeCostPerServing}
-        getCostPerUnit={getCostPerUnit}
-        getIngredientName={getIngredientName}
       />
     </Box>
   )
 }
+

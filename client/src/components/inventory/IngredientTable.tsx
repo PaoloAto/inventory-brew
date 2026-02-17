@@ -2,7 +2,7 @@ import { Checkbox, Table, TableBody, TableCell, TableHead, TableRow, TableSortLa
 import type { Ingredient } from '../../types/ingredient'
 import { IngredientRow } from './IngredientRow'
 
-export type IngredientSortField = 'name' | 'manufacturer' | 'costPerUnit' | 'stockQuantity' | 'totalValue'
+export type IngredientSortField = 'name' | 'manufacturer' | 'costPerUnit' | 'stockQuantity'
 export type SortOrder = 'asc' | 'desc'
 export type IngredientColumnKey =
   | 'name'
@@ -103,15 +103,7 @@ export const IngredientTable = ({
             </TableCell>
           )}
           {isVisible('totalValue') && (
-            <TableCell align="right" sortDirection={sortBy === 'totalValue' ? sortOrder : false}>
-              <TableSortLabel
-                active={sortBy === 'totalValue'}
-                direction={sortBy === 'totalValue' ? sortOrder : 'asc'}
-                onClick={() => onRequestSort('totalValue')}
-              >
-                Total Value
-              </TableSortLabel>
-            </TableCell>
+            <TableCell align="right">Total Value</TableCell>
           )}
           {isVisible('status') && <TableCell>Status</TableCell>}
           {isVisible('actions') && <TableCell align="center">Action</TableCell>}

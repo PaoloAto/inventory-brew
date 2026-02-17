@@ -1,0 +1,431 @@
+{
+  "info": {
+    "_postman_id": "9d04b27b-d14f-42fa-a143-8ca06f96ecf7",
+    "name": "Inventory Brew - Recipes API",
+    "description": "Postman collection for recipes CRUD, validation, archive/restore, and recipe details with computed metrics.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Seed Ingredient 1 (Carrot pcs)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const json = pm.response.json();",
+              "  if (json && json._id) pm.collectionVariables.set('ingredientId1', json._id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Carrot\",\n  \"manufacturer\": \"Fresh Farms\",\n  \"category\": \"Vegetable\",\n  \"unit\": \"pcs\",\n  \"stockQuantity\": 100,\n  \"costPerUnit\": 3.5,\n  \"reorderLevel\": 20\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Seed Ingredient 2 (Olive Oil ml)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const json = pm.response.json();",
+              "  if (json && json._id) pm.collectionVariables.set('ingredientId2', json._id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Olive Oil\",\n  \"manufacturer\": \"Mediterranea\",\n  \"category\": \"Oil\",\n  \"unit\": \"ml\",\n  \"stockQuantity\": 5000,\n  \"costPerUnit\": 0.03,\n  \"reorderLevel\": 700\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ingredients",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ingredients"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Recipe",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "const json = pm.response.json();",
+              "if (json && json._id) pm.collectionVariables.set('recipeId', json._id);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Carrot Salad\",\n  \"description\": \"Simple fresh salad\",\n  \"sellingPrice\": 120,\n  \"ingredients\": [\n    {\n      \"ingredientId\": \"{{ingredientId1}}\",\n      \"quantity\": 2,\n      \"unit\": \"pcs\"\n    },\n    {\n      \"ingredientId\": \"{{ingredientId2}}\",\n      \"quantity\": 10,\n      \"unit\": \"ml\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/recipes",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Recipes",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes?page=1&limit=10&sortBy=name&sortOrder=asc",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "sortBy",
+              "value": "name"
+            },
+            {
+              "key": "sortOrder",
+              "value": "asc"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Recipes (Search)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes?search=salad",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ],
+          "query": [
+            {
+              "key": "search",
+              "value": "salad"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Recipes (Include Computed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes?includeComputed=true",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ],
+          "query": [
+            {
+              "key": "includeComputed",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Recipe By ID (with details + computed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes/{{recipeId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes",
+            "{{recipeId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Cook Recipe (servings=3)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"servings\": 3\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/recipes/{{recipeId}}/cook",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes",
+            "{{recipeId}}",
+            "cook"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Recipe",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Simple fresh salad with olive oil\",\n  \"sellingPrice\": 130,\n  \"ingredients\": [\n    {\n      \"ingredientId\": \"{{ingredientId1}}\",\n      \"quantity\": 2.5,\n      \"unit\": \"pcs\"\n    },\n    {\n      \"ingredientId\": \"{{ingredientId2}}\",\n      \"quantity\": 12,\n      \"unit\": \"ml\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/recipes/{{recipeId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes",
+            "{{recipeId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Recipe (Invalid unit mismatch - Expected 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Broken Recipe\",\n  \"description\": \"Should fail\",\n  \"sellingPrice\": 99,\n  \"ingredients\": [\n    {\n      \"ingredientId\": \"{{ingredientId2}}\",\n      \"quantity\": 2,\n      \"unit\": \"pcs\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/recipes",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Recipe (Invalid duplicate with conflicting unit - Expected 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Duplicate Unit Conflict\",\n  \"description\": \"Should fail\",\n  \"sellingPrice\": 99,\n  \"ingredients\": [\n    {\n      \"ingredientId\": \"{{ingredientId1}}\",\n      \"quantity\": 1,\n      \"unit\": \"pcs\"\n    },\n    {\n      \"ingredientId\": \"{{ingredientId1}}\",\n      \"quantity\": 1,\n      \"unit\": \"g\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/recipes",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Archive Recipe",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes/{{recipeId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes",
+            "{{recipeId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Inactive Recipes",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes?onlyInactive=true",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes"
+          ],
+          "query": [
+            {
+              "key": "onlyInactive",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Restore Recipe",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/recipes/{{recipeId}}/restore",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "recipes",
+            "{{recipeId}}",
+            "restore"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api"
+    },
+    {
+      "key": "ingredientId1",
+      "value": ""
+    },
+    {
+      "key": "ingredientId2",
+      "value": ""
+    },
+    {
+      "key": "recipeId",
+      "value": ""
+    }
+  ]
+}

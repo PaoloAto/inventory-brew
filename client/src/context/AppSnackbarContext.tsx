@@ -1,26 +1,12 @@
 import type { ReactNode } from 'react'
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Snackbar } from '@mui/material'
-
-type SnackbarSeverity = 'success' | 'info' | 'warning' | 'error'
-
-interface SnackbarOptions {
-  severity?: SnackbarSeverity
-  duration?: number
-  actionLabel?: string
-  onAction?: () => void
-}
+import { AppSnackbarContext, type AppSnackbarContextValue, type SnackbarOptions } from './snackbarContext'
 
 interface SnackbarItem extends SnackbarOptions {
   id: number
   message: string
 }
-
-interface AppSnackbarContextValue {
-  showSnackbar: (message: string, options?: SnackbarOptions) => void
-}
-
-const AppSnackbarContext = createContext<AppSnackbarContextValue | null>(null)
 
 export const AppSnackbarProvider = ({ children }: { children: ReactNode }) => {
   const [queue, setQueue] = useState<SnackbarItem[]>([])
@@ -81,12 +67,4 @@ export const AppSnackbarProvider = ({ children }: { children: ReactNode }) => {
       </Snackbar>
     </AppSnackbarContext.Provider>
   )
-}
-
-export const useAppSnackbar = () => {
-  const context = useContext(AppSnackbarContext)
-  if (!context) {
-    throw new Error('useAppSnackbar must be used within AppSnackbarProvider')
-  }
-  return context
 }

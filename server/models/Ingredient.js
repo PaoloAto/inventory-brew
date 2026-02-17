@@ -18,6 +18,7 @@ const ingredientSchema = new mongoose.Schema(
     unit: {
       type: String,
       required: true,
+      enum: ['pcs', 'g', 'kg', 'ml', 'l'],
     },
     stockQuantity: {
       type: Number,
@@ -39,11 +40,16 @@ const ingredientSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
   },
   {
     timestamps: true,
   },
 )
+
+ingredientSchema.index({ isActive: 1, name: 1 })
+ingredientSchema.index({ isActive: 1, category: 1 })
+ingredientSchema.index({ updatedAt: -1 })
 
 module.exports = mongoose.model('Ingredient', ingredientSchema)

@@ -3,6 +3,7 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { DashboardPage } from '../pages/Dashboard/DashboardPage'
 import { IngredientsPage } from '../pages/Ingredients/IngredientsPage'
 import { RecipesPage } from '../pages/Recipes/RecipesPage'
+import { TransactionsPage } from '../pages/Transactions/TransactionsPage'
 
 export const AppRouter = () => {
   return (
@@ -12,6 +13,7 @@ export const AppRouter = () => {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/ingredients" element={<IngredientsPage />} />
           <Route path="/recipes" element={<RecipesPage />} />
+          <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppLayout>
