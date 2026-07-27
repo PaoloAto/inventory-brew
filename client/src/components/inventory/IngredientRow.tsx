@@ -1,8 +1,11 @@
-import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import EditIcon from '@mui/icons-material/Edit'
-import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded'
-import { Chip, Checkbox, TableCell, TableRow, Typography } from '@mui/material'
+import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
+import { Checkbox, Stack, TableCell, TableRow, Typography } from '@mui/material'
 import { RowActionMenu } from '../ui/RowActionMenu'
+import { StatusLabel } from '../ui/StatusLabel'
+import { StockRunway } from '../ui/StockRunway'
+import { formatCurrency, formatQuantity } from '../ui/formatters'
+import { numericSx } from '../../theme'
 import type { Ingredient } from '../../types/ingredient'
 import type { IngredientColumnKey } from './IngredientTable'
 
@@ -12,7 +15,7 @@ interface IngredientRowProps {
   selected: boolean
   onSelect: (id: string, checked: boolean) => void
   onEdit: (ingredient: Ingredient) => void
-  onAdjustStock: (ingredient: Ingredient, delta: number) => void
+  onAdjustStock: (ingredient: Ingredient) => void
 }
 
 export const IngredientRow = ({
@@ -28,6 +31,11 @@ export const IngredientRow = ({
     ingredient.reorderLevel !== undefined
       ? ingredient.stockQuantity < ingredient.reorderLevel
       : ingredient.stockQuantity <= 3
+  const isCritical =
+    ingredient.stockQuantity <= 0 ||
+    (ingredient.reorderLevel !== undefined &&
+      ingredient.reorderLevel > 0 &&
+      ingredient.stockQuantity / ingredient.reorderLevel <= 0.25)
 
   const isVisible = (column: IngredientColumnKey) => visibleColumns.includes(column)
 
@@ -43,28 +51,39 @@ export const IngredientRow = ({
       </TableCell>
 
       {isVisible('name') && (
-        <TableCell sx={{ fontWeight: 600, color: 'primary.main', cursor: 'pointer' }}>{ingredient.name}</TableCell>
+        <TableCell sx={{ fontWeight: 500 }}>{ingredient.name}</TableCell>
       )}
-      {isVisible('manufacturer') && <TableCell>{ingredient.manufacturer ?? 'N/A'}</TableCell>}
-      {isVisible('costPerUnit') && <TableCell align="right">{ingredient.costPerUnit.toFixed(2)}</TableCell>}
-      {isVisible('stockQuantity') && (
-        <TableCell align="right">
-          <Typography component="span" sx={{ fontWeight: 600 }}>
-            {ingredient.stockQuantity.toLocaleString()}
-          </Typography>{' '}
-          <Typography component="span" variant="caption" color="text.secondary">
-            {ingredient.unit}
-          </Typography>
+      {isVisible('manufacturer') && <TableCell>{ingredient.manufacturer ?? '—'}</TableCell>}
+      {isVisible('costPerUnit') && (
+        <TableCell align="right" sx={numericSx}>
+          {formatCurrency(ingredient.costPerUnit)}
         </TableCell>
       )}
-      {isVisible('totalValue') && <TableCell align="right">{totalValue.toFixed(2)}</TableCell>}
+      {isVisible('stockQuantity') && (
+        <TableCell align="right" sx={{ minWidth: 190 }}>
+          <Stack spacing={0.65} alignItems="flex-end">
+            <Typography component="span" sx={{ ...numericSx, fontSize: '0.8125rem', fontWeight: 500 }}>
+              {formatQuantity(ingredient.stockQuantity, ingredient.unit)}
+            </Typography>
+            <StockRunway
+              current={ingredient.stockQuantity}
+              reorderLevel={ingredient.reorderLevel}
+              unit={ingredient.unit}
+              compact
+            />
+          </Stack>
+        </TableCell>
+      )}
+      {isVisible('totalValue') && (
+        <TableCell align="right" sx={numericSx}>
+          {formatCurrency(totalValue)}
+        </TableCell>
+      )}
       {isVisible('status') && (
         <TableCell>
-          <Chip
-            size="small"
-            label={isLowStock ? 'Low' : 'OK'}
-            color={isLowStock ? 'error' : 'success'}
-            variant={isLowStock ? 'outlined' : 'filled'}
+          <StatusLabel
+            label={isCritical ? 'Critical' : isLowStock ? 'Low stock' : 'On target'}
+            tone={isCritical ? 'danger' : isLowStock ? 'warning' : 'success'}
           />
         </TableCell>
       )}
@@ -74,17 +93,10 @@ export const IngredientRow = ({
             tooltip={`Actions for ${ingredient.name}`}
             actions={[
               {
-                key: 'increase',
-                label: 'Increase stock',
-                icon: <AddRoundedIcon fontSize="small" />,
-                onClick: () => onAdjustStock(ingredient, 1),
-              },
-              {
-                key: 'decrease',
-                label: 'Decrease stock',
-                icon: <RemoveRoundedIcon fontSize="small" />,
-                onClick: () => onAdjustStock(ingredient, -1),
-                disabled: ingredient.stockQuantity <= 0,
+                key: 'adjust',
+                label: 'Adjust stock',
+                icon: <TuneRoundedIcon fontSize="small" />,
+                onClick: () => onAdjustStock(ingredient),
               },
               {
                 key: 'edit',

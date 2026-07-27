@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Box, CircularProgress, Typography } from '@mui/material'
+import { Box, Skeleton, Stack } from '@mui/material'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
 
@@ -29,20 +29,20 @@ const TransactionsPage = lazy(() =>
 
 const RouteLoader = () => {
   return (
-    <Box
-      sx={{
-        minHeight: 320,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1.4,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <CircularProgress size={30} />
-      <Typography variant="body2" color="text.secondary">
-        Loading workspace...
-      </Typography>
+    <Box aria-label="Loading page" sx={{ pt: 0.5 }}>
+      <Skeleton variant="text" width={220} height={38} />
+      <Skeleton variant="text" width="min(440px, 80%)" height={24} />
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0} sx={{ mt: 3 }}>
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton
+            key={index}
+            variant="rectangular"
+            height={92}
+            sx={{ flex: 1, border: '1px solid', borderColor: 'divider' }}
+          />
+        ))}
+      </Stack>
+      <Skeleton variant="rectangular" height={260} sx={{ mt: 3 }} />
     </Box>
   )
 }

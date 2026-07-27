@@ -1,10 +1,12 @@
-import { Chip, TableCell, TableRow } from '@mui/material'
+import { TableCell, TableRow, Typography } from '@mui/material'
 import RestaurantIcon from '@mui/icons-material/Restaurant'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import EditIcon from '@mui/icons-material/Edit'
 import { RowActionMenu } from '../ui/RowActionMenu'
 import type { Recipe } from '../../types/recipe'
 import type { RecipeColumnKey } from './RecipeTable'
+import { formatCurrency, formatPercentage } from '../ui/formatters'
+import { numericSx } from '../../theme'
 
 interface RecipeRowProps {
   recipe: Recipe
@@ -27,30 +29,43 @@ export const RecipeRow = ({
   const margin = recipe.sellingPrice - cost
   const marginPercent = recipe.sellingPrice ? (margin / recipe.sellingPrice) * 100 : 0
 
-  const marginColor = marginPercent < 20 ? 'error' : marginPercent < 40 ? 'warning' : 'success'
   const isVisible = (column: RecipeColumnKey) => visibleColumns.includes(column)
+  const marginColor =
+    marginPercent < 20 ? 'error.main' : marginPercent < 40 ? 'warning.main' : 'text.primary'
 
   return (
     <TableRow hover>
-      {isVisible('name') && <TableCell sx={{ fontWeight: 600 }}>{recipe.name}</TableCell>}
+      {isVisible('name') && <TableCell sx={{ fontWeight: 500 }}>{recipe.name}</TableCell>}
       {isVisible('description') && (
         <TableCell sx={{ maxWidth: 260 }} title={recipe.description}>
           {recipe.description}
         </TableCell>
       )}
 
-      {isVisible('sellingPrice') && <TableCell align="right">{recipe.sellingPrice.toFixed(2)}</TableCell>}
-      {isVisible('costPerServing') && <TableCell align="right">{cost.toFixed(2)}</TableCell>}
+      {isVisible('sellingPrice') && (
+        <TableCell align="right" sx={numericSx}>{formatCurrency(recipe.sellingPrice)}</TableCell>
+      )}
+      {isVisible('costPerServing') && (
+        <TableCell align="right" sx={numericSx}>{formatCurrency(cost)}</TableCell>
+      )}
 
       {isVisible('margin') && (
+        <TableCell align="right" sx={{ ...numericSx, color: marginColor, fontWeight: 500 }}>
+          {formatCurrency(margin)}
+        </TableCell>
+      )}
+
+      {isVisible('marginPercent') && (
         <TableCell align="right">
-          <Chip size="small" label={`${margin.toFixed(2)} (${marginPercent.toFixed(0)}%)`} color={marginColor} variant="outlined" />
+          <Typography component="span" sx={{ ...numericSx, color: marginColor, fontSize: '0.8125rem' }}>
+            {formatPercentage(marginPercent)}
+          </Typography>
         </TableCell>
       )}
 
       {isVisible('ingredientCount') && (
-        <TableCell align="center">
-          <Chip size="small" variant="outlined" label={`${recipe.ingredients.length} items`} />
+        <TableCell align="right" sx={numericSx}>
+          {recipe.ingredients.length}
         </TableCell>
       )}
 

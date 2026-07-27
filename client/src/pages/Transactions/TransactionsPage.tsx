@@ -1,8 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import SwapVertRoundedIcon from '@mui/icons-material/SwapVertRounded'
 import {
   Box,
   Button,
-  Chip,
   FormControl,
   InputLabel,
   MenuItem,
@@ -15,6 +15,7 @@ import {
   TablePagination,
   TableRow,
   TextField,
+  Typography,
 } from '@mui/material'
 import {
   listTransactions,
@@ -22,12 +23,20 @@ import {
   type InventoryTransactionType,
 } from '../../api/transactions'
 import { getErrorMessage } from '../../api/error'
-import { EmptyState } from '../../components/ui/EmptyState'
-import { GradientCard } from '../../components/ui/GradientCard'
-import { PageHeader } from '../../components/ui/PageHeader'
-import { SectionCard } from '../../components/ui/SectionCard'
+import { DataToolbar } from '../../components/ui/DataToolbar'
+import {
+  formatCurrency,
+  formatDateTime,
+  formatQuantity,
+  formatSignedQuantity,
+} from '../../components/ui/formatters'
+import { LedgerEmptyState } from '../../components/ui/LedgerEmptyState'
+import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
+import { LedgerTableContainer } from '../../components/ui/LedgerTableContainer'
+import { StatusLabel } from '../../components/ui/StatusLabel'
 import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import { useAppSnackbar } from '../../context/snackbarContext'
+import { numericSx } from '../../theme'
 
 type TypeFilter = 'all' | InventoryTransactionType
 
@@ -45,21 +54,8 @@ const defaultFilters: TransactionFilters = {
   dateTo: '',
 }
 
-const formatDateTime = (input: string) => {
-  const date = new Date(input)
-  if (Number.isNaN(date.getTime())) return input
-  return date.toLocaleString()
-}
-
-const getTypeColor = (type: InventoryTransactionType) => {
-  if (type === 'IN') return 'success'
-  if (type === 'OUT') return 'warning'
-  return 'default'
-}
-
 export const TransactionsPage = () => {
   const { showSnackbar } = useAppSnackbar()
-
   const [rows, setRows] = useState<InventoryTransaction[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [draftFilters, setDraftFilters] = useState<TransactionFilters>(defaultFilters)
@@ -69,14 +65,14 @@ export const TransactionsPage = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [totalRows, setTotalRows] = useState(0)
 
-  const hasActiveFilters = useMemo(() => {
-    return (
+  const hasActiveFilters = useMemo(
+    () =>
       filters.type !== 'all' ||
       Boolean(filters.reason) ||
       Boolean(filters.dateFrom) ||
-      Boolean(filters.dateTo)
-    )
-  }, [filters])
+      Boolean(filters.dateTo),
+    [filters],
+  )
 
   const loadTransactions = useCallback(async () => {
     setIsLoading(true)
@@ -92,7 +88,6 @@ export const TransactionsPage = () => {
         sortBy: 'createdAt',
         sortOrder,
       })
-
       setRows(response.items)
       setTotalRows(response.pagination.total)
     } catch (error) {
@@ -106,12 +101,7 @@ export const TransactionsPage = () => {
     void loadTransactions()
   }, [loadTransactions])
 
-  const handleApplyFilters = () => {
-    setFilters(draftFilters)
-    setPage(0)
-  }
-
-  const handleResetFilters = () => {
+  const resetFilters = () => {
     setDraftFilters(defaultFilters)
     setFilters(defaultFilters)
     setPage(0)
@@ -119,206 +109,206 @@ export const TransactionsPage = () => {
 
   return (
     <Box>
-      <PageHeader
+      <LedgerPageHeader
         title="Transactions"
-        subtitle="Audit every stock movement with filterable operational history."
-        badgeLabel="Audit Trail"
+        subtitle="Every receipt, usage event, and stock correction in chronological order."
+        meta={
+          <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit' }}>
+            {totalRows} movement{totalRows === 1 ? '' : 's'}
+          </Typography>
+        }
       />
 
-      <GradientCard
-        title="Inventory Movements"
-        subtitle="Track every stock change with filterable audit history."
-        accent="info"
-        rightContent={
-          <Chip
-            label={`${totalRows} total record${totalRows === 1 ? '' : 's'}`}
-            size="small"
-            variant="outlined"
-            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
-          />
-        }
-      >
-        <Stack spacing={2}>
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            spacing={1.2}
-            alignItems={{ xs: 'stretch', md: 'center' }}
-          >
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="transaction-type-label">Type</InputLabel>
+      <DataToolbar
+        primary={
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
+            <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 145 } }}>
+              <InputLabel id="transaction-type-label">Movement type</InputLabel>
               <Select
                 labelId="transaction-type-label"
-                label="Type"
+                label="Movement type"
                 value={draftFilters.type}
                 onChange={(event) =>
-                  setDraftFilters((prev) => ({
-                    ...prev,
+                  setDraftFilters((previous) => ({
+                    ...previous,
                     type: event.target.value as TypeFilter,
                   }))
                 }
               >
-                <MenuItem value="all">All Types</MenuItem>
-                <MenuItem value="IN">IN</MenuItem>
-                <MenuItem value="OUT">OUT</MenuItem>
-                <MenuItem value="ADJUST">ADJUST</MenuItem>
+                <MenuItem value="all">All movements</MenuItem>
+                <MenuItem value="IN">Received</MenuItem>
+                <MenuItem value="OUT">Used</MenuItem>
+                <MenuItem value="ADJUST">Adjusted</MenuItem>
               </Select>
             </FormControl>
-
             <TextField
               size="small"
-              label="Reason contains"
+              label="Reason"
               value={draftFilters.reason}
               onChange={(event) =>
-                setDraftFilters((prev) => ({
-                  ...prev,
-                  reason: event.target.value,
-                }))
+                setDraftFilters((previous) => ({ ...previous, reason: event.target.value }))
               }
-              sx={{ minWidth: { xs: '100%', md: 220 } }}
+              sx={{ minWidth: { xs: '100%', sm: 190 } }}
             />
-
             <TextField
               size="small"
-              label="Date from"
+              label="From"
               type="date"
               value={draftFilters.dateFrom}
               onChange={(event) =>
-                setDraftFilters((prev) => ({
-                  ...prev,
-                  dateFrom: event.target.value,
-                }))
+                setDraftFilters((previous) => ({ ...previous, dateFrom: event.target.value }))
               }
               InputLabelProps={{ shrink: true }}
             />
-
             <TextField
               size="small"
-              label="Date to"
+              label="To"
               type="date"
               value={draftFilters.dateTo}
               onChange={(event) =>
-                setDraftFilters((prev) => ({
-                  ...prev,
-                  dateTo: event.target.value,
-                }))
+                setDraftFilters((previous) => ({ ...previous, dateTo: event.target.value }))
               }
               InputLabelProps={{ shrink: true }}
             />
-
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleApplyFilters}>
-                Apply
-              </Button>
-              <Button variant="outlined" onClick={handleResetFilters} disabled={!hasActiveFilters}>
-                Reset
-              </Button>
-            </Stack>
           </Stack>
-
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Chip
-              label={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
+        }
+        secondary={
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant="contained"
               onClick={() => {
-                setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+                setFilters(draftFilters)
                 setPage(0)
               }}
-              color="primary"
-              variant="outlined"
-            />
+            >
+              Apply filters
+            </Button>
+            <Button variant="outlined" onClick={resetFilters} disabled={!hasActiveFilters}>
+              Reset
+            </Button>
+            <Button
+              variant="text"
+              startIcon={<SwapVertRoundedIcon />}
+              onClick={() => {
+                setSortOrder((previous) => (previous === 'desc' ? 'asc' : 'desc'))
+                setPage(0)
+              }}
+            >
+              {sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
+            </Button>
           </Stack>
+        }
+      />
 
-          <SectionCard
-            title="Movement Records"
-            subtitle="Chronological stock movements with reasons and references."
-            padded={false}
-          >
-            <Box
-              sx={{
-                overflow: 'auto',
-                maxHeight: 500,
-                backgroundColor: 'rgba(255,255,255,0.72)',
-              }}
-            >
-              {isLoading ? (
-                <TableSkeleton rows={8} />
-              ) : rows.length === 0 ? (
-                <EmptyState
-                  title="No transactions found"
-                  description="Try adjusting your filters or date range."
-                  minHeight={180}
-                />
-              ) : (
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell>Ingredient</TableCell>
-                      <TableCell align="center">Type</TableCell>
-                      <TableCell align="right">Quantity</TableCell>
-                      <TableCell align="right">Previous</TableCell>
-                      <TableCell align="right">New</TableCell>
-                      <TableCell>Reason</TableCell>
-                      <TableCell>Reference</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {rows.map((transaction) => (
-                      <TableRow key={transaction.id} hover>
-                        <TableCell>{formatDateTime(transaction.createdAt)}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>
-                          {transaction.ingredient?.name ?? transaction.ingredientId}
-                        </TableCell>
-                        <TableCell align="center">
-                          <Chip
-                            size="small"
-                            color={getTypeColor(transaction.type)}
-                            label={transaction.type}
-                            variant="outlined"
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          {transaction.quantity} {transaction.ingredient?.unit ?? ''}
-                        </TableCell>
-                        <TableCell align="right">{transaction.previousStock}</TableCell>
-                        <TableCell align="right">{transaction.newStock}</TableCell>
-                        <TableCell>{transaction.reason || 'No reason'}</TableCell>
-                        <TableCell>
-                          {transaction.reference
-                            ? `${transaction.reference.type}${transaction.reference.name ? `: ${transaction.reference.name}` : ''}`
-                            : 'N/A'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </Box>
+      <LedgerTableContainer maxHeight={590}>
+        {isLoading ? (
+          <TableSkeleton rows={9} />
+        ) : rows.length === 0 ? (
+          <LedgerEmptyState
+            title="No transactions found"
+            description="Change the filters or date range to inspect a different part of the ledger."
+            minHeight={220}
+          />
+        ) : (
+          <Table size="small" stickyHeader aria-label="Inventory movement ledger">
+            <TableHead>
+              <TableRow>
+                <TableCell>Date and time</TableCell>
+                <TableCell>Ingredient</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell align="right">Movement</TableCell>
+                <TableCell align="right">Before → after</TableCell>
+                <TableCell align="right">Unit cost</TableCell>
+                <TableCell>Reason</TableCell>
+                <TableCell>Reference</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map((transaction) => {
+                const unit = transaction.ingredient?.unit
+                return (
+                  <TableRow key={transaction.id} hover>
+                    <TableCell sx={{ ...numericSx, minWidth: 155, color: 'text.secondary' }}>
+                      {formatDateTime(transaction.createdAt)}
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 145, fontWeight: 500 }}>
+                      {transaction.ingredient?.name ?? transaction.ingredientId}
+                    </TableCell>
+                    <TableCell>
+                      <StatusLabel
+                        label={transaction.type}
+                        tone={
+                          transaction.type === 'IN'
+                            ? 'success'
+                            : transaction.type === 'OUT'
+                              ? 'warning'
+                              : 'neutral'
+                        }
+                      />
+                    </TableCell>
+                    <TableCell
+                      align="right"
+                      sx={{
+                        ...numericSx,
+                        minWidth: 115,
+                        color:
+                          transaction.type === 'IN'
+                            ? 'success.main'
+                            : transaction.type === 'OUT'
+                              ? 'warning.main'
+                              : 'text.primary',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {formatSignedQuantity(transaction.quantity, transaction.type, unit)}
+                    </TableCell>
+                    <TableCell align="right" sx={{ ...numericSx, minWidth: 155, whiteSpace: 'nowrap' }}>
+                      {formatQuantity(transaction.previousStock, unit)} →{' '}
+                      {formatQuantity(transaction.newStock, unit)}
+                    </TableCell>
+                    <TableCell align="right" sx={numericSx}>
+                      {transaction.unitCost === undefined ? '—' : formatCurrency(transaction.unitCost)}
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 165 }}>
+                      {transaction.reason || 'No reason recorded'}
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 140 }}>
+                      {transaction.reference
+                        ? transaction.reference.name || transaction.reference.type
+                        : transaction.referenceType || '—'}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </LedgerTableContainer>
 
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              justifyContent="flex-end"
-              sx={{
-                px: 1.2,
-                borderTop: '1px solid',
-                borderColor: 'divider',
-              }}
-            >
-              <TablePagination
-                component="div"
-                count={totalRows}
-                page={page}
-                onPageChange={(_event, newPage) => setPage(newPage)}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(event) => {
-                  setRowsPerPage(parseInt(event.target.value, 10))
-                  setPage(0)
-                }}
-                rowsPerPageOptions={[5, 10, 20, 50]}
-              />
-            </Stack>
-          </SectionCard>
-        </Stack>
-      </GradientCard>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          bgcolor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderTop: 0,
+        }}
+      >
+        <TablePagination
+          component="div"
+          sx={{ maxWidth: '100%', overflowX: 'auto' }}
+          count={totalRows}
+          page={page}
+          onPageChange={(_event, newPage) => setPage(newPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(Number.parseInt(event.target.value, 10))
+            setPage(0)
+          }}
+          rowsPerPageOptions={[5, 10, 20, 50]}
+        />
+      </Box>
     </Box>
   )
 }

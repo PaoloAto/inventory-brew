@@ -1,5 +1,5 @@
 import { Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from '@mui/material'
-import { EmptyState } from '../ui/EmptyState'
+import { LedgerEmptyState } from '../ui/LedgerEmptyState'
 import type { Recipe } from '../../types/recipe'
 import { RecipeRow } from './RecipeRow'
 
@@ -11,6 +11,7 @@ export type RecipeColumnKey =
   | 'sellingPrice'
   | 'costPerServing'
   | 'margin'
+  | 'marginPercent'
   | 'ingredientCount'
   | 'actions'
 
@@ -73,10 +74,13 @@ export const RecipeTable = ({
             <TableCell align="right">Cost / Serving</TableCell>
           )}
           {isVisible('margin') && (
-            <TableCell align="right">Margin</TableCell>
+            <TableCell align="right">Gross margin</TableCell>
+          )}
+          {isVisible('marginPercent') && (
+            <TableCell align="right">Margin %</TableCell>
           )}
           {isVisible('ingredientCount') && (
-            <TableCell align="center">Ingredients</TableCell>
+            <TableCell align="right">Ingredients</TableCell>
           )}
           {isVisible('actions') && <TableCell align="center">Actions</TableCell>}
         </TableRow>
@@ -85,9 +89,9 @@ export const RecipeTable = ({
         {recipes.length === 0 ? (
           <TableRow>
             <TableCell colSpan={Math.max(columnCount, 1)} align="center">
-              <EmptyState
+              <LedgerEmptyState
                 title="No recipes found"
-                description="Adjust your search or add a new recipe."
+                description="Change the search or add the first recipe to the costing ledger."
                 minHeight={160}
               />
             </TableCell>

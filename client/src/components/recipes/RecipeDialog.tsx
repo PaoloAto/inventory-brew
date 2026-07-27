@@ -22,6 +22,7 @@ interface RecipeDialogProps {
   open: boolean
   initialData?: Recipe | null
   availableIngredients: Ingredient[]
+  saving?: boolean
   onClose: () => void
   onSave: (input: RecipeInput) => void
 }
@@ -45,7 +46,14 @@ const getInitialValues = (initialData?: Recipe | null): RecipeInput => {
   }
 }
 
-export const RecipeDialog = ({ open, initialData, availableIngredients, onClose, onSave }: RecipeDialogProps) => {
+export const RecipeDialog = ({
+  open,
+  initialData,
+  availableIngredients,
+  saving = false,
+  onClose,
+  onSave,
+}: RecipeDialogProps) => {
   const [values, setValues] = useState<RecipeInput>(() => getInitialValues(initialData))
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -99,12 +107,12 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={saving ? undefined : onClose}
       maxWidth="md"
       fullWidth
       TransitionProps={{ onEnter: handleReset }}
     >
-      <DialogTitle>{mode} Recipe</DialogTitle>
+      <DialogTitle>{mode} recipe</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
           <Grid size={{ xs: 12, sm: 8 }}>
@@ -120,7 +128,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
-              label="Selling Price"
+              label="Selling price"
               value={values.sellingPrice}
               onChange={(e) => handleChange('sellingPrice', Number(e.target.value))}
               fullWidth
@@ -142,7 +150,7 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
         </Grid>
 
         <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>
-          Ingredients (per serving)
+          Ingredients per serving
         </Typography>
         <Grid container spacing={1.5}>
           {values.ingredients.map((ri, idx) => (
@@ -195,7 +203,11 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
                 size={{ xs: 2, sm: 2 }}
                 sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
               >
-                <IconButton color="error" onClick={() => removeIngredientRow(idx)}>
+                <IconButton
+                  color="error"
+                  onClick={() => removeIngredientRow(idx)}
+                  aria-label={`Remove ingredient row ${idx + 1}`}
+                >
                   <DeleteOutlineIcon />
                 </IconButton>
               </Grid>
@@ -209,9 +221,9 @@ export const RecipeDialog = ({ open, initialData, availableIngredients, onClose,
         </Grid>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSave}>
-          Save
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving' : 'Save recipe'}
         </Button>
       </DialogActions>
     </Dialog>

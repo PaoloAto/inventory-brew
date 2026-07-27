@@ -48,11 +48,10 @@ export const RowActionMenu = ({
           sx={{
             border: '1px solid',
             borderColor: 'divider',
-            bgcolor: 'rgba(255,255,255,0.9)',
-            transition: 'all 150ms ease',
+            bgcolor: 'background.paper',
             '&:hover': {
-              borderColor: 'primary.light',
-              bgcolor: 'rgba(45,127,249,0.1)',
+              borderColor: 'text.secondary',
+              bgcolor: 'action.hover',
             },
           }}
         >
@@ -67,7 +66,6 @@ export const RowActionMenu = ({
           paper: {
             sx: {
               mt: 0.6,
-              borderRadius: 2,
               border: '1px solid',
               borderColor: 'divider',
             },

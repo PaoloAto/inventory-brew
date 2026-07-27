@@ -6,14 +6,29 @@ interface TableSkeletonProps {
 
 export const TableSkeleton = ({ rows = 6 }: TableSkeletonProps) => {
   return (
-    <Box sx={{ px: 2.2, py: 1.8 }}>
-      <Stack spacing={1.15}>
-        <Skeleton variant="rounded" height={34} />
+    <Box aria-label="Loading table" sx={{ py: 0 }}>
+      <Stack spacing={0}>
+        <Skeleton variant="rectangular" height={38} />
         {Array.from({ length: rows }).map((_, index) => (
-          <Skeleton key={index} variant="rounded" height={28} />
+          <Box
+            key={index}
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: '1.4fr repeat(4, 1fr)',
+              gap: 2,
+              alignItems: 'center',
+              height: 44,
+              px: 1.5,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            {Array.from({ length: 5 }).map((__, cellIndex) => (
+              <Skeleton key={cellIndex} variant="text" width={cellIndex === 0 ? '75%' : '55%'} />
+            ))}
+          </Box>
         ))}
       </Stack>
     </Box>
   )
 }
-

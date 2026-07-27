@@ -1,5 +1,5 @@
 import { Checkbox, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from '@mui/material'
-import { EmptyState } from '../ui/EmptyState'
+import { LedgerEmptyState } from '../ui/LedgerEmptyState'
 import type { Ingredient } from '../../types/ingredient'
 import { IngredientRow } from './IngredientRow'
 
@@ -22,7 +22,7 @@ interface IngredientTableProps {
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAll: (checked: boolean) => void
   onEdit: (ingredient: Ingredient) => void
-  onAdjustStock: (ingredient: Ingredient, delta: number) => void
+  onAdjustStock: (ingredient: Ingredient) => void
   sortBy: IngredientSortField
   sortOrder: SortOrder
   onRequestSort: (field: IngredientSortField) => void
@@ -114,9 +114,9 @@ export const IngredientTable = ({
         {ingredients.length === 0 ? (
           <TableRow>
             <TableCell colSpan={columnCount} align="center">
-              <EmptyState
+              <LedgerEmptyState
                 title="No ingredients found"
-                description="Try changing your filters or add a new ingredient."
+                description="Change the filters or add the first ingredient to this ledger."
                 minHeight={160}
               />
             </TableCell>

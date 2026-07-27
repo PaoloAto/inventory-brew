@@ -16,6 +16,7 @@ export type IngredientInput = Omit<Ingredient, 'id' | 'isActive'> & { id?: strin
 interface IngredientDialogProps {
   open: boolean
   initialData?: Ingredient | null
+  saving?: boolean
   onClose: () => void
   onSave: (input: IngredientInput) => void
 }
@@ -40,7 +41,13 @@ const getInitialValues = (initialData?: Ingredient | null): IngredientInput => {
   }
 }
 
-export const IngredientDialog = ({ open, initialData, onClose, onSave }: IngredientDialogProps) => {
+export const IngredientDialog = ({
+  open,
+  initialData,
+  saving = false,
+  onClose,
+  onSave,
+}: IngredientDialogProps) => {
   const [values, setValues] = useState<IngredientInput>(() => getInitialValues(initialData))
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -76,12 +83,12 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={saving ? undefined : onClose}
       maxWidth="sm"
       fullWidth
       TransitionProps={{ onEnter: handleReset }}
     >
-      <DialogTitle>{mode} Ingredient</DialogTitle>
+      <DialogTitle>{mode} ingredient</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
           <Grid size={{ xs: 12, sm: 8 }}>
@@ -132,7 +139,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
-              label="Stock Quantity"
+              label="Stock quantity"
               value={values.stockQuantity}
               onChange={(e) => handleChange('stockQuantity', Number(e.target.value))}
               fullWidth
@@ -144,7 +151,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
-              label="Cost per Unit"
+              label="Cost per unit"
               value={values.costPerUnit}
               onChange={(e) => handleChange('costPerUnit', Number(e.target.value))}
               fullWidth
@@ -156,7 +163,7 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
-              label="Reorder Level"
+              label="Reorder level"
               value={values.reorderLevel ?? 0}
               onChange={(e) => handleChange('reorderLevel', Number(e.target.value))}
               fullWidth
@@ -168,9 +175,9 @@ export const IngredientDialog = ({ open, initialData, onClose, onSave }: Ingredi
         </Grid>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSave}>
-          Save
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving' : 'Save ingredient'}
         </Button>
       </DialogActions>
     </Dialog>

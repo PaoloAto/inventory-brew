@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Stack,
-  TableContainer,
   TablePagination,
   TextField,
+  Typography,
 } from '@mui/material'
 import { useSearchParams } from 'react-router-dom'
 import { getErrorMessage } from '../../api/error'
@@ -31,9 +31,9 @@ import {
   type RecipeSortField,
   type SortOrder,
 } from '../../components/recipes/RecipeTable'
-import { GradientCard } from '../../components/ui/GradientCard'
-import { PageHeader } from '../../components/ui/PageHeader'
-import { SectionCard } from '../../components/ui/SectionCard'
+import { DataToolbar } from '../../components/ui/DataToolbar'
+import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
+import { LedgerTableContainer } from '../../components/ui/LedgerTableContainer'
 import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import {
   TableViewControls,
@@ -42,15 +42,17 @@ import {
 } from '../../components/ui/TableViewControls'
 import { useAppSnackbar } from '../../context/snackbarContext'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import { numericSx } from '../../theme'
 import type { Ingredient } from '../../types/ingredient'
 import type { Recipe, RecipeIngredient } from '../../types/recipe'
 
 const recipeColumnOptions: Array<TableColumnOption<RecipeColumnKey>> = [
   { key: 'name', label: 'Recipe', locked: true },
   { key: 'description', label: 'Description' },
-  { key: 'sellingPrice', label: 'Price / Serving' },
-  { key: 'costPerServing', label: 'Cost / Serving' },
-  { key: 'margin', label: 'Margin' },
+  { key: 'sellingPrice', label: 'Selling price' },
+  { key: 'costPerServing', label: 'Ingredient cost' },
+  { key: 'margin', label: 'Gross margin' },
+  { key: 'marginPercent', label: 'Margin %' },
   { key: 'ingredientCount', label: 'Ingredients' },
   { key: 'actions', label: 'Actions', locked: true },
 ]
@@ -67,48 +69,34 @@ const parsePositiveInt = (value: string | null, fallback: number) => {
   return Number.isNaN(parsed) || parsed < 1 ? fallback : parsed
 }
 
-const parseSortOrder = (value: string | null): SortOrder => {
-  return value === 'desc' ? 'desc' : 'asc'
-}
-
-const parseSortField = (value: string | null): RecipeSortField => {
-  return value === 'sellingPrice' ? 'sellingPrice' : 'name'
-}
+const parseSortOrder = (value: string | null): SortOrder => (value === 'desc' ? 'desc' : 'asc')
+const parseSortField = (value: string | null): RecipeSortField =>
+  value === 'sellingPrice' ? 'sellingPrice' : 'name'
 
 export const RecipesPage = () => {
   const { showSnackbar } = useAppSnackbar()
   const [searchParams, setSearchParams] = useSearchParams()
-
-  const initialSearch = searchParams.get('q') ?? ''
-  const initialSortBy = parseSortField(searchParams.get('sortBy'))
-  const initialSortOrder = parseSortOrder(searchParams.get('sortOrder'))
-  const initialRowsPerPage = parsePositiveInt(searchParams.get('rows'), 10)
-  const initialPage = Math.max(parsePositiveInt(searchParams.get('page'), 1) - 1, 0)
-
-  const [searchInput, setSearchInput] = useState(initialSearch)
+  const [searchInput, setSearchInput] = useState(searchParams.get('q') ?? '')
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [totalRecipes, setTotalRecipes] = useState(0)
   const [availableIngredients, setAvailableIngredients] = useState<Ingredient[]>([])
   const [isLoading, setIsLoading] = useState(true)
-
+  const [isSaving, setIsSaving] = useState(false)
+  const [isCooking, setIsCooking] = useState(false)
   const [cookOpen, setCookOpen] = useState(false)
   const [cookServings, setCookServings] = useState(1)
   const [recipeToCook, setRecipeToCook] = useState<Recipe | null>(null)
-
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Recipe | null>(null)
-
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetails | null>(null)
-
-  const [sortBy, setSortBy] = useState<RecipeSortField>(initialSortBy)
-  const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder)
+  const [sortBy, setSortBy] = useState<RecipeSortField>(parseSortField(searchParams.get('sortBy')))
+  const [sortOrder, setSortOrder] = useState<SortOrder>(parseSortOrder(searchParams.get('sortOrder')))
   const [density, setDensity] = useState<TableDensity>('compact')
   const [visibleColumns, setVisibleColumns] = useState<RecipeColumnKey[]>(defaultRecipeColumns)
-  const [page, setPage] = useState(initialPage)
-  const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage)
-
+  const [page, setPage] = useState(Math.max(parsePositiveInt(searchParams.get('page'), 1) - 1, 0))
+  const [rowsPerPage, setRowsPerPage] = useState(parsePositiveInt(searchParams.get('rows'), 10))
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 350)
 
   const ingredientCostMap = useMemo(
@@ -117,12 +105,11 @@ export const RecipesPage = () => {
   )
 
   const computeCostPerServing = useCallback(
-    (ingredients: RecipeIngredient[]) => {
-      return ingredients.reduce((sum, recipeIngredient) => {
+    (ingredients: RecipeIngredient[]) =>
+      ingredients.reduce((sum, recipeIngredient) => {
         const costPerUnit = ingredientCostMap[recipeIngredient.ingredientId] ?? 0
         return sum + costPerUnit * recipeIngredient.quantity
-      }, 0)
-    },
+      }, 0),
     [ingredientCostMap],
   )
 
@@ -152,7 +139,6 @@ export const RecipesPage = () => {
         sortBy: recipeSortFieldMap[sortBy],
         sortOrder,
       })
-
       setRecipes(response.items)
       setTotalRecipes(response.pagination.total)
     } catch (error) {
@@ -177,22 +163,19 @@ export const RecipesPage = () => {
   useEffect(() => {
     const nextParams = new URLSearchParams()
     const trimmedSearch = searchInput.trim()
-
     if (trimmedSearch) nextParams.set('q', trimmedSearch)
     if (sortBy !== 'name') nextParams.set('sortBy', sortBy)
     if (sortOrder !== 'asc') nextParams.set('sortOrder', sortOrder)
     if (page > 0) nextParams.set('page', String(page + 1))
     if (rowsPerPage !== 10) nextParams.set('rows', String(rowsPerPage))
-
-    const nextQuery = nextParams.toString()
-    if (nextQuery !== searchParams.toString()) {
+    if (nextParams.toString() !== searchParams.toString()) {
       setSearchParams(nextParams, { replace: true })
     }
   }, [page, rowsPerPage, searchInput, searchParams, setSearchParams, sortBy, sortOrder])
 
   const handleRequestSort = (field: RecipeSortField) => {
     if (sortBy === field) {
-      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      setSortOrder((previous) => (previous === 'asc' ? 'desc' : 'asc'))
       return
     }
     setSortBy(field)
@@ -200,31 +183,17 @@ export const RecipesPage = () => {
   }
 
   const handleToggleColumn = (column: RecipeColumnKey) => {
-    setVisibleColumns((prev) => {
-      if (prev.includes(column)) return prev.filter((current) => current !== column)
-
-      const next = [...prev, column]
+    setVisibleColumns((previous) => {
+      if (previous.includes(column)) return previous.filter((current) => current !== column)
+      const next = [...previous, column]
       return defaultRecipeColumns.filter((columnKey) => next.includes(columnKey))
     })
   }
 
-  const handleOpenCook = (recipe: Recipe) => {
-    setRecipeToCook(recipe)
-    setCookServings(1)
-    setCookOpen(true)
-  }
-
-  const handleOpenAdd = () => {
-    setEditing(null)
-    setDialogOpen(true)
-  }
-
-  const handleOpenEdit = (recipe: Recipe) => {
-    setEditing(recipe)
-    setDialogOpen(true)
-  }
-
-  const handleSave = async (input: Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean }) => {
+  const handleSave = async (
+    input: Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean },
+  ) => {
+    setIsSaving(true)
     try {
       if (input.id) {
         await updateRecipe(input.id, {
@@ -244,12 +213,13 @@ export const RecipesPage = () => {
         })
         showSnackbar('Recipe added', { severity: 'success' })
       }
-
       setDialogOpen(false)
       setEditing(null)
       await loadRecipes()
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to save recipe'), { severity: 'error' })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -257,10 +227,8 @@ export const RecipesPage = () => {
     setDetailsOpen(true)
     setDetailsLoading(true)
     setRecipeDetails(null)
-
     try {
-      const details = await getRecipeDetails(recipe.id)
-      setRecipeDetails(details)
+      setRecipeDetails(await getRecipeDetails(recipe.id))
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to load recipe details'), { severity: 'error' })
       setDetailsOpen(false)
@@ -269,22 +237,12 @@ export const RecipesPage = () => {
     }
   }
 
-  const handleCloseDetails = () => {
-    setRecipeDetails(null)
-    setDetailsOpen(false)
-  }
-
-  const handleCloseCook = () => {
-    setCookOpen(false)
-    setRecipeToCook(null)
-  }
-
   const handleConfirmCook = async () => {
     if (!recipeToCook) return
-
+    setIsCooking(true)
     try {
-      const result = await cookRecipe(recipeToCook.id, cookServings)
-      showSnackbar(`Cooked ${cookServings} servings of ${recipeToCook.name} (${result.executionMode})`, {
+      await cookRecipe(recipeToCook.id, cookServings)
+      showSnackbar(`Cooked ${cookServings} serving${cookServings === 1 ? '' : 's'} of ${recipeToCook.name}`, {
         severity: 'success',
       })
       setCookOpen(false)
@@ -292,132 +250,138 @@ export const RecipesPage = () => {
       await loadRecipes()
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to cook recipe'), { severity: 'error' })
+    } finally {
+      setIsCooking(false)
     }
   }
 
   return (
     <Box>
-      <PageHeader
+      <LedgerPageHeader
         title="Recipes"
-        subtitle="Manage dish formulas and keep margin visibility at serving level."
-        badgeLabel="Kitchen Formulas"
+        subtitle="A costing ledger for dish formulas, selling price, and margin."
+        meta={
+          <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit' }}>
+            {totalRecipes} active recipe{totalRecipes === 1 ? '' : 's'}
+          </Typography>
+        }
+        actions={
+          <Button
+            variant="contained"
+            startIcon={<AddRoundedIcon />}
+            onClick={() => {
+              setEditing(null)
+              setDialogOpen(true)
+            }}
+          >
+            Add recipe
+          </Button>
+        }
       />
 
-      <GradientCard
-        title="Recipe Book"
-        subtitle="Review pricing, cost, and margin with backend-powered pagination."
-        rightContent={
-          <Chip
-            label={`${recipes.length} on page / ${totalRecipes} total`}
+      <DataToolbar
+        primary={
+          <TextField
             size="small"
-            variant="outlined"
-            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
+            label="Search recipes"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            sx={{ minWidth: { xs: '100%', sm: 260 } }}
           />
         }
-      >
-        <Stack spacing={2}>
-          <Stack
-            direction={{ xs: 'column', xl: 'row' }}
-            spacing={2}
-            justifyContent="space-between"
-            alignItems={{ xs: 'stretch', xl: 'center' }}
-          >
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2}>
-              <TextField
-                size="small"
-                label="Search recipe"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                sx={{ minWidth: { xs: '100%', sm: 260 } }}
-              />
-              <Button variant="contained" onClick={handleOpenAdd}>
-                Add Recipe
-              </Button>
-            </Stack>
+        secondary={
+          <TableViewControls
+            columnOptions={recipeColumnOptions}
+            visibleColumns={visibleColumns}
+            density={density}
+            onDensityChange={setDensity}
+            onToggleColumn={handleToggleColumn}
+            onResetColumns={() => setVisibleColumns(defaultRecipeColumns)}
+          />
+        }
+      />
 
-            <TableViewControls
-              columnOptions={recipeColumnOptions}
-              visibleColumns={visibleColumns}
-              density={density}
-              onDensityChange={setDensity}
-              onToggleColumn={handleToggleColumn}
-              onResetColumns={() => setVisibleColumns(defaultRecipeColumns)}
+      <LedgerTableContainer maxHeight={560}>
+        {isLoading ? (
+          <TableSkeleton rows={8} />
+        ) : (
+          <RecipeTable
+            recipes={recipes}
+            visibleColumns={visibleColumns}
+            tableSize={density === 'compact' ? 'small' : 'medium'}
+            computeCostPerServing={computeCostPerServing}
+            onCook={(recipe) => {
+              setRecipeToCook(recipe)
+              setCookServings(1)
+              setCookOpen(true)
+            }}
+            onView={(recipe) => void handleOpenDetails(recipe)}
+            onEdit={(recipe) => {
+              setEditing(recipe)
+              setDialogOpen(true)
+            }}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onRequestSort={handleRequestSort}
+          />
+        )}
+      </LedgerTableContainer>
+
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          bgcolor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderTop: 0,
+        }}
+      >
+        <TablePagination
+          component="div"
+          sx={{ maxWidth: '100%', overflowX: 'auto' }}
+          count={totalRecipes}
+          page={page}
+          onPageChange={(_event, newPage) => setPage(newPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(Number.parseInt(event.target.value, 10))
+            setPage(0)
+          }}
+          rowsPerPageOptions={[5, 10, 20]}
+        />
+      </Box>
+
+      <Dialog
+        open={cookOpen}
+        onClose={isCooking ? undefined : () => setCookOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Cook recipe</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="subtitle1">{recipeToCook?.name}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Cooking records ingredient usage and reduces stock.
+              </Typography>
+            </Box>
+            <TextField
+              autoFocus
+              label="Servings"
+              type="number"
+              fullWidth
+              value={cookServings}
+              onChange={(event) => setCookServings(Math.max(1, Number(event.target.value) || 1))}
+              inputProps={{ min: 1, step: 1 }}
             />
           </Stack>
-
-          <SectionCard
-            title="Recipe Records"
-            subtitle="Manage formulas, inspect margins, and trigger cook actions."
-            padded={false}
-          >
-            <TableContainer
-              sx={{
-                maxHeight: 460,
-                backgroundColor: 'rgba(255,255,255,0.72)',
-              }}
-            >
-              {isLoading ? (
-                <TableSkeleton rows={7} />
-              ) : (
-                <RecipeTable
-                  recipes={recipes}
-                  visibleColumns={visibleColumns}
-                  tableSize={density === 'compact' ? 'small' : 'medium'}
-                  computeCostPerServing={computeCostPerServing}
-                  onCook={handleOpenCook}
-                  onView={handleOpenDetails}
-                  onEdit={handleOpenEdit}
-                  sortBy={sortBy}
-                  sortOrder={sortOrder}
-                  onRequestSort={handleRequestSort}
-                />
-              )}
-            </TableContainer>
-
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              justifyContent="flex-end"
-              sx={{
-                px: 1.2,
-                borderTop: '1px solid',
-                borderColor: 'divider',
-              }}
-            >
-              <TablePagination
-                component="div"
-                count={totalRecipes}
-                page={page}
-                onPageChange={(_event, newPage) => setPage(newPage)}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(event) => {
-                  setRowsPerPage(parseInt(event.target.value, 10))
-                  setPage(0)
-                }}
-                rowsPerPageOptions={[5, 10, 20]}
-              />
-            </Stack>
-          </SectionCard>
-        </Stack>
-      </GradientCard>
-
-      <Dialog open={cookOpen} onClose={handleCloseCook} maxWidth="xs" fullWidth>
-        <DialogTitle>{recipeToCook ? `Cook "${recipeToCook.name}"` : 'Cook Recipe'}</DialogTitle>
-        <DialogContent sx={{ pt: 1 }}>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Number of servings"
-            type="number"
-            fullWidth
-            value={cookServings}
-            onChange={(e) => setCookServings(Number(e.target.value) || 1)}
-            inputProps={{ min: 1 }}
-          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseCook}>Cancel</Button>
-          <Button variant="contained" onClick={handleConfirmCook}>
-            Cook
+          <Button onClick={() => setCookOpen(false)} disabled={isCooking}>Cancel</Button>
+          <Button variant="contained" onClick={() => void handleConfirmCook()} disabled={isCooking}>
+            {isCooking ? 'Cooking' : 'Cook recipe'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -426,15 +390,18 @@ export const RecipesPage = () => {
         open={dialogOpen}
         initialData={editing ?? undefined}
         availableIngredients={availableIngredients}
+        saving={isSaving}
         onClose={() => setDialogOpen(false)}
-        onSave={handleSave}
+        onSave={(input) => void handleSave(input)}
       />
-
       <RecipeDetailsDialog
         open={detailsOpen}
         details={recipeDetails}
         loading={detailsLoading}
-        onClose={handleCloseDetails}
+        onClose={() => {
+          setRecipeDetails(null)
+          setDetailsOpen(false)
+        }}
       />
     </Box>
   )

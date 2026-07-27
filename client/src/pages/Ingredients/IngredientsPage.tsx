@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import {
   Box,
   Button,
-  Chip,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
-  TableContainer,
   TablePagination,
   TextField,
+  Typography,
 } from '@mui/material'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -16,6 +20,7 @@ import {
   listIngredients,
   restoreIngredient,
   updateIngredient,
+  type AdjustStockPayload,
 } from '../../api/ingredients'
 import { getErrorMessage } from '../../api/error'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
@@ -25,9 +30,10 @@ import {
   type IngredientSortField,
   type SortOrder,
 } from '../../components/inventory/IngredientTable'
-import { GradientCard } from '../../components/ui/GradientCard'
-import { PageHeader } from '../../components/ui/PageHeader'
-import { SectionCard } from '../../components/ui/SectionCard'
+import { StockAdjustmentDialog } from '../../components/inventory/StockAdjustmentDialog'
+import { DataToolbar } from '../../components/ui/DataToolbar'
+import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
+import { LedgerTableContainer } from '../../components/ui/LedgerTableContainer'
 import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import {
   TableViewControls,
@@ -36,6 +42,7 @@ import {
 } from '../../components/ui/TableViewControls'
 import { useAppSnackbar } from '../../context/snackbarContext'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import { numericSx } from '../../theme'
 import type { Ingredient } from '../../types/ingredient'
 
 type StockFilter = 'all' | 'low' | 'healthy'
@@ -43,9 +50,9 @@ type StockFilter = 'all' | 'low' | 'healthy'
 const ingredientColumnOptions: Array<TableColumnOption<IngredientColumnKey>> = [
   { key: 'name', label: 'Ingredient', locked: true },
   { key: 'manufacturer', label: 'Manufacturer' },
-  { key: 'costPerUnit', label: 'Cost / Unit' },
+  { key: 'costPerUnit', label: 'Cost / unit' },
   { key: 'stockQuantity', label: 'Stock' },
-  { key: 'totalValue', label: 'Total Value' },
+  { key: 'totalValue', label: 'Total value' },
   { key: 'status', label: 'Status' },
   { key: 'actions', label: 'Actions', locked: true },
 ]
@@ -69,9 +76,7 @@ const parseStockFilter = (value: string | null): StockFilter => {
   return 'all'
 }
 
-const parseSortOrder = (value: string | null): SortOrder => {
-  return value === 'desc' ? 'desc' : 'asc'
-}
+const parseSortOrder = (value: string | null): SortOrder => (value === 'desc' ? 'desc' : 'asc')
 
 const parseSortField = (value: string | null): IngredientSortField => {
   if (value === 'manufacturer' || value === 'costPerUnit' || value === 'stockQuantity') {
@@ -84,31 +89,24 @@ export const IngredientsPage = () => {
   const { showSnackbar } = useAppSnackbar()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const initialSearch = searchParams.get('q') ?? ''
-  const initialStockFilter = parseStockFilter(searchParams.get('stock'))
-  const initialCategoryFilter = searchParams.get('category') ?? 'all'
-  const initialSortBy = parseSortField(searchParams.get('sortBy'))
-  const initialSortOrder = parseSortOrder(searchParams.get('sortOrder'))
-  const initialRowsPerPage = parsePositiveInt(searchParams.get('rows'), 10)
-  const initialPage = Math.max(parsePositiveInt(searchParams.get('page'), 1) - 1, 0)
-
-  const [searchInput, setSearchInput] = useState(initialSearch)
+  const [searchInput, setSearchInput] = useState(searchParams.get('q') ?? '')
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [totalIngredients, setTotalIngredients] = useState(0)
   const [categoryOptions, setCategoryOptions] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Ingredient | null>(null)
-  const [stockFilter, setStockFilter] = useState<StockFilter>(initialStockFilter)
-  const [categoryFilter, setCategoryFilter] = useState<string>(initialCategoryFilter)
-  const [sortBy, setSortBy] = useState<IngredientSortField>(initialSortBy)
-  const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder)
+  const [adjusting, setAdjusting] = useState<Ingredient | null>(null)
+  const [stockFilter, setStockFilter] = useState<StockFilter>(parseStockFilter(searchParams.get('stock')))
+  const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') ?? 'all')
+  const [sortBy, setSortBy] = useState<IngredientSortField>(parseSortField(searchParams.get('sortBy')))
+  const [sortOrder, setSortOrder] = useState<SortOrder>(parseSortOrder(searchParams.get('sortOrder')))
   const [density, setDensity] = useState<TableDensity>('compact')
   const [visibleColumns, setVisibleColumns] = useState<IngredientColumnKey[]>(defaultIngredientColumns)
-  const [page, setPage] = useState(initialPage)
-  const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage)
-
+  const [page, setPage] = useState(Math.max(parsePositiveInt(searchParams.get('page'), 1) - 1, 0))
+  const [rowsPerPage, setRowsPerPage] = useState(parsePositiveInt(searchParams.get('rows'), 10))
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 350)
 
   const loadIngredients = useCallback(async () => {
@@ -128,12 +126,13 @@ export const IngredientsPage = () => {
 
       setIngredients(response.items)
       setTotalIngredients(response.pagination.total)
-      setSelectedIds((prev) => prev.filter((id) => response.items.some((item) => item.id === id)))
-      setCategoryOptions((prev) => {
-        const merged = new Set(prev)
+      setSelectedIds((previous) =>
+        previous.filter((id) => response.items.some((item) => item.id === id)),
+      )
+      setCategoryOptions((previous) => {
+        const merged = new Set(previous)
         response.items.forEach((item) => {
-          const category = item.category?.trim()
-          if (category) merged.add(category)
+          if (item.category?.trim()) merged.add(item.category.trim())
         })
         if (categoryFilter !== 'all') merged.add(categoryFilter)
         return [...merged].sort((a, b) => a.localeCompare(b))
@@ -156,7 +155,6 @@ export const IngredientsPage = () => {
   useEffect(() => {
     const nextParams = new URLSearchParams()
     const trimmedSearch = searchInput.trim()
-
     if (trimmedSearch) nextParams.set('q', trimmedSearch)
     if (stockFilter !== 'all') nextParams.set('stock', stockFilter)
     if (categoryFilter !== 'all') nextParams.set('category', categoryFilter)
@@ -165,31 +163,29 @@ export const IngredientsPage = () => {
     if (page > 0) nextParams.set('page', String(page + 1))
     if (rowsPerPage !== 10) nextParams.set('rows', String(rowsPerPage))
 
-    const nextQuery = nextParams.toString()
-    if (nextQuery !== searchParams.toString()) {
+    if (nextParams.toString() !== searchParams.toString()) {
       setSearchParams(nextParams, { replace: true })
     }
   }, [categoryFilter, page, rowsPerPage, searchInput, searchParams, setSearchParams, sortBy, sortOrder, stockFilter])
 
-  const categoryChips = useMemo(() => categoryOptions, [categoryOptions])
-
   const handleToggleSelect = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((value) => value !== id)))
+    setSelectedIds((previous) =>
+      checked ? [...new Set([...previous, id])] : previous.filter((value) => value !== id),
+    )
   }
 
   const handleToggleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const pageIds = ingredients.map((item) => item.id)
-      setSelectedIds((prev) => [...new Set([...prev, ...pageIds])])
-    } else {
-      const pageIds = new Set(ingredients.map((item) => item.id))
-      setSelectedIds((prev) => prev.filter((id) => !pageIds.has(id)))
-    }
+    const pageIds = new Set(ingredients.map((item) => item.id))
+    setSelectedIds((previous) =>
+      checked
+        ? [...new Set([...previous, ...pageIds])]
+        : previous.filter((id) => !pageIds.has(id)),
+    )
   }
 
   const handleRequestSort = (field: IngredientSortField) => {
     if (sortBy === field) {
-      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      setSortOrder((previous) => (previous === 'asc' ? 'desc' : 'asc'))
       return
     }
     setSortBy(field)
@@ -197,25 +193,15 @@ export const IngredientsPage = () => {
   }
 
   const handleToggleColumn = (column: IngredientColumnKey) => {
-    setVisibleColumns((prev) => {
-      if (prev.includes(column)) return prev.filter((current) => current !== column)
-
-      const next = [...prev, column]
+    setVisibleColumns((previous) => {
+      if (previous.includes(column)) return previous.filter((current) => current !== column)
+      const next = [...previous, column]
       return defaultIngredientColumns.filter((columnKey) => next.includes(columnKey))
     })
   }
 
-  const openAddDialog = () => {
-    setEditing(null)
-    setDialogOpen(true)
-  }
-
-  const openEditDialog = (ingredient: Ingredient) => {
-    setEditing(ingredient)
-    setDialogOpen(true)
-  }
-
   const handleSave = async (input: IngredientInput) => {
+    setIsSaving(true)
     try {
       if (input.id && editing) {
         await updateIngredient(input.id, {
@@ -227,7 +213,6 @@ export const IngredientsPage = () => {
           reorderLevel: input.reorderLevel,
           isActive: input.isActive,
         })
-
         if (input.stockQuantity !== editing.stockQuantity) {
           await adjustIngredientStock(input.id, {
             type: 'ADJUST',
@@ -235,7 +220,6 @@ export const IngredientsPage = () => {
             reason: 'Adjusted from ingredient form',
           })
         }
-
         showSnackbar('Ingredient updated', { severity: 'success' })
       } else {
         await createIngredient({
@@ -252,61 +236,46 @@ export const IngredientsPage = () => {
       }
 
       if (input.category?.trim()) {
-        setCategoryOptions((prev) => {
-          const merged = new Set(prev)
-          merged.add(input.category!.trim())
-          return [...merged].sort((a, b) => a.localeCompare(b))
-        })
+        setCategoryOptions((previous) => [...new Set([...previous, input.category!.trim()])].sort())
       }
-
       setDialogOpen(false)
       setEditing(null)
       await loadIngredients()
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to save ingredient'), { severity: 'error' })
+    } finally {
+      setIsSaving(false)
     }
   }
 
-  const handleAdjustStock = async (ingredient: Ingredient, delta: number) => {
-    if (delta === 0) return
-
+  const handleAdjustStock = async (payload: AdjustStockPayload) => {
+    if (!adjusting) return
+    setIsSaving(true)
     try {
-      if (delta > 0) {
-        await adjustIngredientStock(ingredient.id, {
-          type: 'IN',
-          quantity: delta,
-          reason: 'Quick stock increase from table',
-        })
-      } else {
-        await adjustIngredientStock(ingredient.id, {
-          type: 'OUT',
-          quantity: Math.abs(delta),
-          reason: 'Quick stock decrease from table',
-        })
-      }
-
+      await adjustIngredientStock(adjusting.id, payload)
       showSnackbar('Stock adjusted', { severity: 'success' })
+      setAdjusting(null)
       await loadIngredients()
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to adjust stock'), { severity: 'error' })
+    } finally {
+      setIsSaving(false)
     }
   }
 
-  const handleDeleteSelected = async () => {
+  const handleArchiveSelected = async () => {
     if (selectedIds.length === 0) return
-
-    const idsToDelete = [...selectedIds]
-
+    const idsToArchive = [...selectedIds]
     try {
-      await Promise.all(idsToDelete.map((id) => archiveIngredient(id)))
+      await Promise.all(idsToArchive.map((id) => archiveIngredient(id)))
       setSelectedIds([])
-      showSnackbar(`${idsToDelete.length} ingredient${idsToDelete.length > 1 ? 's' : ''} archived`, {
+      showSnackbar(`${idsToArchive.length} ingredient${idsToArchive.length === 1 ? '' : 's'} archived`, {
         severity: 'info',
         actionLabel: 'Undo',
         onAction: () => {
           void (async () => {
             try {
-              await Promise.all(idsToDelete.map((id) => restoreIngredient(id)))
+              await Promise.all(idsToArchive.map((id) => restoreIngredient(id)))
               await loadIngredients()
               showSnackbar('Ingredients restored', { severity: 'success' })
             } catch (error) {
@@ -323,161 +292,163 @@ export const IngredientsPage = () => {
 
   return (
     <Box>
-      <PageHeader
+      <LedgerPageHeader
         title="Ingredients"
-        subtitle="Track stock-on-hand, costs, and reorder pressure in real time."
-        badgeLabel="Live Inventory"
+        subtitle="Track stock on hand, unit cost, and reorder pressure."
+        meta={
+          <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit' }}>
+            {totalIngredients} active ingredient{totalIngredients === 1 ? '' : 's'}
+          </Typography>
+        }
+        actions={
+          <Button
+            variant="contained"
+            startIcon={<AddRoundedIcon />}
+            onClick={() => {
+              setEditing(null)
+              setDialogOpen(true)
+            }}
+          >
+            Add ingredient
+          </Button>
+        }
       />
 
-      <GradientCard
-        title="Ingredients Inventory"
-        subtitle="Search, filter, sort, and maintain stock data quickly."
-        rightContent={
-          <Chip
-            label={`${ingredients.length} on page / ${totalIngredients} total`}
-            size="small"
-            variant="outlined"
-            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.7)' }}
+      <DataToolbar
+        primary={
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
+            <TextField
+              size="small"
+              label="Search"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              sx={{ minWidth: { xs: '100%', sm: 230 } }}
+            />
+            <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 150 } }}>
+              <InputLabel id="stock-status-filter-label">Stock status</InputLabel>
+              <Select
+                labelId="stock-status-filter-label"
+                label="Stock status"
+                value={stockFilter}
+                onChange={(event) => setStockFilter(event.target.value as StockFilter)}
+              >
+                <MenuItem value="all">All stock</MenuItem>
+                <MenuItem value="low">Low stock</MenuItem>
+                <MenuItem value="healthy">On target</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 160 } }}>
+              <InputLabel id="category-filter-label">Category</InputLabel>
+              <Select
+                labelId="category-filter-label"
+                label="Category"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <MenuItem value="all">All categories</MenuItem>
+                {categoryOptions.map((category) => (
+                  <MenuItem key={category} value={category}>
+                    {category}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        }
+        secondary={
+          <TableViewControls
+            columnOptions={ingredientColumnOptions}
+            visibleColumns={visibleColumns}
+            density={density}
+            onDensityChange={setDensity}
+            onToggleColumn={handleToggleColumn}
+            onResetColumns={() => setVisibleColumns(defaultIngredientColumns)}
           />
         }
+      />
+
+      <LedgerTableContainer maxHeight={560}>
+        {isLoading ? (
+          <TableSkeleton rows={8} />
+        ) : (
+          <IngredientTable
+            ingredients={ingredients}
+            selectedIds={selectedIds}
+            visibleColumns={visibleColumns}
+            tableSize={density === 'compact' ? 'small' : 'medium'}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
+            onEdit={(ingredient) => {
+              setEditing(ingredient)
+              setDialogOpen(true)
+            }}
+            onAdjustStock={setAdjusting}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onRequestSort={handleRequestSort}
+          />
+        )}
+      </LedgerTableContainer>
+
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        alignItems={{ xs: 'stretch', sm: 'center' }}
+        justifyContent="space-between"
+        spacing={1}
+        sx={{
+          minHeight: 50,
+          px: { xs: 1.5, sm: 2 },
+          bgcolor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderTop: 0,
+        }}
       >
-        <Stack spacing={2}>
-          <Stack
-            direction={{ xs: 'column', xl: 'row' }}
-            spacing={2}
-            justifyContent="space-between"
-            alignItems={{ xs: 'stretch', xl: 'center' }}
-          >
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2}>
-              <TextField
-                size="small"
-                label="Search ingredient"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                sx={{ minWidth: { xs: '100%', sm: 260 } }}
-              />
-              <Button variant="contained" onClick={openAddDialog}>
-                Add Ingredient
-              </Button>
-            </Stack>
-
-            <TableViewControls
-              columnOptions={ingredientColumnOptions}
-              visibleColumns={visibleColumns}
-              density={density}
-              onDensityChange={setDensity}
-              onToggleColumn={handleToggleColumn}
-              onResetColumns={() => setVisibleColumns(defaultIngredientColumns)}
-            />
+        {selectedIds.length > 0 ? (
+          <Stack direction="row" alignItems="center" spacing={1.25}>
+            <Typography variant="body2">
+              <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit', fontWeight: 500 }}>
+                {selectedIds.length}
+              </Typography>{' '}
+              selected
+            </Typography>
+            <Button color="error" size="small" onClick={() => void handleArchiveSelected()}>
+              Archive selected
+            </Button>
           </Stack>
-
-          <Stack direction="row" spacing={0.9} flexWrap="wrap" useFlexGap>
-            <Chip
-              label="All"
-              color={stockFilter === 'all' ? 'primary' : 'default'}
-              variant={stockFilter === 'all' ? 'filled' : 'outlined'}
-              onClick={() => setStockFilter('all')}
-            />
-            <Chip
-              label="Low Stock"
-              color={stockFilter === 'low' ? 'error' : 'default'}
-              variant={stockFilter === 'low' ? 'filled' : 'outlined'}
-              onClick={() => setStockFilter('low')}
-            />
-            <Chip
-              label="Healthy"
-              color={stockFilter === 'healthy' ? 'success' : 'default'}
-              variant={stockFilter === 'healthy' ? 'filled' : 'outlined'}
-              onClick={() => setStockFilter('healthy')}
-            />
-            <Chip
-              label={categoryFilter === 'all' ? 'All Categories' : categoryFilter}
-              variant="outlined"
-              onClick={() => setCategoryFilter('all')}
-            />
-            {categoryChips.map((category) => (
-              <Chip
-                key={category}
-                label={category}
-                color={categoryFilter === category ? 'primary' : 'default'}
-                variant={categoryFilter === category ? 'filled' : 'outlined'}
-                onClick={() => setCategoryFilter(category)}
-              />
-            ))}
-          </Stack>
-
-          <SectionCard
-            title="Ingredient Records"
-            subtitle="Use row actions to adjust stock or edit details."
-            padded={false}
-          >
-            <TableContainer
-              sx={{
-                maxHeight: 460,
-                backgroundColor: 'rgba(255,255,255,0.72)',
-              }}
-            >
-              {isLoading ? (
-                <TableSkeleton rows={7} />
-              ) : (
-                <IngredientTable
-                  ingredients={ingredients}
-                  selectedIds={selectedIds}
-                  visibleColumns={visibleColumns}
-                  tableSize={density === 'compact' ? 'small' : 'medium'}
-                  onToggleSelect={handleToggleSelect}
-                  onToggleSelectAll={handleToggleSelectAll}
-                  onEdit={openEditDialog}
-                  onAdjustStock={handleAdjustStock}
-                  sortBy={sortBy}
-                  sortOrder={sortOrder}
-                  onRequestSort={handleRequestSort}
-                />
-              )}
-            </TableContainer>
-
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              justifyContent="space-between"
-              alignItems={{ xs: 'stretch', sm: 'center' }}
-              sx={{
-                px: 1.2,
-                borderTop: '1px solid',
-                borderColor: 'divider',
-              }}
-            >
-              <Button
-                variant="outlined"
-                color="error"
-                disabled={selectedIds.length === 0}
-                onClick={handleDeleteSelected}
-                sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, ml: 1.2 }}
-              >
-                Archive selected
-              </Button>
-
-              <TablePagination
-                component="div"
-                count={totalIngredients}
-                page={page}
-                onPageChange={(_event, newPage) => setPage(newPage)}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(event) => {
-                  setRowsPerPage(parseInt(event.target.value, 10))
-                  setPage(0)
-                }}
-                rowsPerPageOptions={[5, 10, 20]}
-              />
-            </Stack>
-          </SectionCard>
-        </Stack>
-      </GradientCard>
+        ) : (
+          <Typography variant="caption" color="text.secondary">
+            Select rows for bulk actions
+          </Typography>
+        )}
+        <TablePagination
+          component="div"
+          sx={{ maxWidth: '100%', overflowX: 'auto' }}
+          count={totalIngredients}
+          page={page}
+          onPageChange={(_event, newPage) => setPage(newPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(Number.parseInt(event.target.value, 10))
+            setPage(0)
+          }}
+          rowsPerPageOptions={[5, 10, 20]}
+        />
+      </Stack>
 
       <IngredientDialog
         open={dialogOpen}
         initialData={editing ?? undefined}
+        saving={isSaving}
         onClose={() => setDialogOpen(false)}
-        onSave={handleSave}
+        onSave={(input) => void handleSave(input)}
+      />
+      <StockAdjustmentDialog
+        open={Boolean(adjusting)}
+        ingredient={adjusting}
+        saving={isSaving}
+        onClose={() => setAdjusting(null)}
+        onConfirm={(payload) => void handleAdjustStock(payload)}
       />
     </Box>
   )

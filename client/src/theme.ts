@@ -1,143 +1,210 @@
-import { alpha, createTheme } from '@mui/material/styles'
+import { createTheme } from '@mui/material/styles'
 
-const fontFamily = '"Manrope", "Avenir Next", "Segoe UI", sans-serif'
+export const ledgerTokens = {
+  canvas: '#F7F7F5',
+  surface: '#FFFFFF',
+  surfaceSecondary: '#F1F1ED',
+  ink: '#171817',
+  textSecondary: '#676962',
+  textSubtle: '#858780',
+  border: '#D9DAD4',
+  borderStrong: '#BFC1BA',
+  hover: '#EEEEEA',
+  action: '#26332D',
+  actionHover: '#19241F',
+  success: '#2F6B4F',
+  successBackground: '#E8F1EC',
+  successBorder: '#BED4C7',
+  warning: '#94631D',
+  warningBackground: '#F6EEDC',
+  warningBorder: '#E1C994',
+  danger: '#A1433C',
+  dangerBackground: '#F7E8E6',
+  dangerBorder: '#E1BBB7',
+} as const
+
+export const numericFontFamily = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
+
+export const numericSx = {
+  fontFamily: numericFontFamily,
+  fontVariantNumeric: 'tabular-nums',
+  letterSpacing: '-0.015em',
+} as const
 
 export const theme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: '#2D7FF9',
-      light: '#6EA8FF',
-      dark: '#1F5FC9',
-    },
-    secondary: {
-      main: '#00A7A0',
+      main: ledgerTokens.action,
+      dark: ledgerTokens.actionHover,
+      contrastText: '#FFFFFF',
     },
     success: {
-      main: '#22A06B',
+      main: ledgerTokens.success,
+      light: ledgerTokens.successBackground,
     },
     warning: {
-      main: '#F79009',
+      main: ledgerTokens.warning,
+      light: ledgerTokens.warningBackground,
     },
     error: {
-      main: '#F04438',
+      main: ledgerTokens.danger,
+      light: ledgerTokens.dangerBackground,
     },
     text: {
-      primary: '#0F1E38',
-      secondary: '#5D6B83',
+      primary: ledgerTokens.ink,
+      secondary: ledgerTokens.textSecondary,
+      disabled: ledgerTokens.textSubtle,
     },
     background: {
-      default: '#F1F4FB',
-      paper: '#FFFFFF',
+      default: ledgerTokens.canvas,
+      paper: ledgerTokens.surface,
     },
-    divider: '#E2E8F3',
+    divider: ledgerTokens.border,
   },
   shape: {
-    borderRadius: 16,
+    borderRadius: 5,
   },
   typography: {
-    fontFamily,
-    h4: { fontWeight: 800, letterSpacing: '-0.02em' },
-    h5: { fontWeight: 750, letterSpacing: '-0.02em' },
-    h6: { fontWeight: 700, letterSpacing: '-0.01em' },
-    subtitle2: { fontWeight: 700, letterSpacing: '0.03em' },
-    button: {
+    fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
+    fontSize: 14,
+    h4: {
+      fontSize: '1.625rem',
+      lineHeight: 1.2,
+      fontWeight: 500,
+      letterSpacing: '-0.025em',
+    },
+    h5: {
+      fontSize: '1.25rem',
+      lineHeight: 1.3,
+      fontWeight: 500,
+      letterSpacing: '-0.015em',
+    },
+    h6: {
+      fontSize: '1rem',
+      lineHeight: 1.35,
+      fontWeight: 500,
+    },
+    subtitle1: {
+      fontSize: '0.9375rem',
+      fontWeight: 500,
+    },
+    subtitle2: {
+      fontSize: '0.8125rem',
+      fontWeight: 500,
+    },
+    body1: {
+      fontSize: '0.875rem',
+      lineHeight: 1.55,
+    },
+    body2: {
+      fontSize: '0.8125rem',
+      lineHeight: 1.5,
+    },
+    caption: {
+      fontSize: '0.75rem',
+      lineHeight: 1.45,
+    },
+    overline: {
+      fontSize: '0.6875rem',
+      lineHeight: 1.4,
+      fontWeight: 500,
+      letterSpacing: '0.055em',
       textTransform: 'none',
-      fontWeight: 700,
-      letterSpacing: '0.01em',
+    },
+    button: {
+      fontSize: '0.8125rem',
+      lineHeight: 1.2,
+      textTransform: 'none',
+      fontWeight: 500,
+      letterSpacing: 0,
     },
   },
   components: {
     MuiCssBaseline: {
       styleOverrides: {
+        ':root': {
+          colorScheme: 'light',
+        },
         body: {
-          background:
-            'radial-gradient(900px 500px at 20% -10%, rgba(44,127,249,0.12), transparent 65%), radial-gradient(900px 500px at 95% 5%, rgba(0,167,160,0.10), transparent 60%), #F1F4FB',
-          color: '#0F1E38',
+          margin: 0,
+          backgroundColor: ledgerTokens.canvas,
+          color: ledgerTokens.ink,
+        },
+        '*': {
+          boxSizing: 'border-box',
+        },
+        '*::selection': {
+          backgroundColor: ledgerTokens.warningBackground,
+          color: ledgerTokens.ink,
         },
         '::-webkit-scrollbar': {
-          width: '10px',
-          height: '10px',
+          width: 10,
+          height: 10,
         },
         '::-webkit-scrollbar-thumb': {
-          backgroundColor: '#C5D0E3',
-          borderRadius: '10px',
+          backgroundColor: ledgerTokens.borderStrong,
+          border: `3px solid ${ledgerTokens.canvas}`,
         },
-        '::-webkit-scrollbar-thumb:hover': {
-          backgroundColor: '#B0BCD2',
+        '@media (prefers-reduced-motion: reduce)': {
+          '*, *::before, *::after': {
+            animationDuration: '0.01ms !important',
+            animationIterationCount: '1 !important',
+            transitionDuration: '0.01ms !important',
+            scrollBehavior: 'auto !important',
+          },
         },
       },
     },
     MuiPaper: {
+      defaultProps: {
+        elevation: 0,
+      },
       styleOverrides: {
         root: {
-          borderRadius: 16,
-          border: '1px solid #E7ECF5',
-          transition: 'box-shadow 180ms ease, border-color 180ms ease',
+          backgroundImage: 'none',
         },
       },
     },
-    MuiCard: {
+    MuiButtonBase: {
       styleOverrides: {
         root: {
-          borderRadius: 18,
-          border: '1px solid #E7ECF5',
-          boxShadow: '0 14px 34px rgba(10, 34, 81, 0.10)',
+          '&.Mui-focusVisible': {
+            outline: `2px solid ${ledgerTokens.action}`,
+            outlineOffset: 2,
+          },
         },
       },
     },
     MuiButton: {
+      defaultProps: {
+        disableElevation: true,
+      },
       styleOverrides: {
         root: {
-          borderRadius: 12,
-          paddingInline: '18px',
-          minHeight: 40,
-          transition: 'transform 140ms ease, box-shadow 180ms ease, filter 180ms ease',
-          '&:hover': {
-            transform: 'translateY(-1px)',
-          },
-          '&:active': {
-            transform: 'translateY(0)',
-          },
-        },
-        contained: {
-          boxShadow: '0 10px 24px rgba(45, 127, 249, 0.22)',
-          '&:hover': {
-            boxShadow: '0 14px 28px rgba(45, 127, 249, 0.28)',
-            filter: 'saturate(1.05)',
-          },
+          minHeight: 36,
+          borderRadius: 5,
+          paddingInline: 14,
+          transition: 'background-color 150ms ease, border-color 150ms ease, color 150ms ease',
         },
         containedPrimary: {
-          background: 'linear-gradient(90deg, #2D7FF9, #55A5FF)',
+          backgroundColor: ledgerTokens.action,
+          '&:hover': {
+            backgroundColor: ledgerTokens.actionHover,
+          },
         },
         outlined: {
-          borderColor: '#C9D4E8',
+          borderColor: ledgerTokens.borderStrong,
+          color: ledgerTokens.ink,
           '&:hover': {
-            borderColor: '#9FB4D8',
-            backgroundColor: alpha('#2D7FF9', 0.04),
+            borderColor: ledgerTokens.action,
+            backgroundColor: ledgerTokens.hover,
           },
         },
-      },
-    },
-    MuiTextField: {
-      defaultProps: {
-        variant: 'outlined',
-      },
-    },
-    MuiOutlinedInput: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          backgroundColor: alpha('#FFFFFF', 0.94),
-          '& fieldset': {
-            borderColor: '#D9E3F2',
-          },
-          '&:hover fieldset': {
-            borderColor: '#B7CAE7',
-          },
-          '&.Mui-focused fieldset': {
-            borderColor: '#2D7FF9',
-            boxShadow: `0 0 0 3px ${alpha('#2D7FF9', 0.12)}`,
+        text: {
+          color: ledgerTokens.ink,
+          '&:hover': {
+            backgroundColor: ledgerTokens.hover,
           },
         },
       },
@@ -145,48 +212,116 @@ export const theme = createTheme({
     MuiIconButton: {
       styleOverrides: {
         root: {
-          transition: 'background-color 140ms ease, transform 140ms ease',
+          borderRadius: 4,
+          transition: 'background-color 150ms ease, color 150ms ease',
           '&:hover': {
-            transform: 'translateY(-1px)',
+            backgroundColor: ledgerTokens.hover,
           },
-          '&:active': {
-            transform: 'translateY(0)',
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          borderRadius: 5,
+          backgroundColor: ledgerTokens.surface,
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: ledgerTokens.borderStrong,
           },
+          '&:hover .MuiOutlinedInput-notchedOutline': {
+            borderColor: ledgerTokens.textSecondary,
+          },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+            borderWidth: 1,
+            borderColor: ledgerTokens.action,
+          },
+        },
+        input: {
+          paddingTop: 10,
+          paddingBottom: 10,
+        },
+      },
+    },
+    MuiInputLabel: {
+      styleOverrides: {
+        root: {
+          fontSize: '0.875rem',
+        },
+      },
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          border: `1px solid ${ledgerTokens.borderStrong}`,
+          borderRadius: 6,
+          boxShadow: '0 18px 48px rgba(23, 24, 23, 0.16)',
+        },
+      },
+    },
+    MuiDialogTitle: {
+      styleOverrides: {
+        root: {
+          padding: '20px 24px 16px',
+          fontSize: '1.0625rem',
+          fontWeight: 500,
+          borderBottom: `1px solid ${ledgerTokens.border}`,
+        },
+      },
+    },
+    MuiDialogContent: {
+      styleOverrides: {
+        root: {
+          padding: 24,
+          '&.MuiDialogContent-dividers': {
+            borderTop: 0,
+            borderBottomColor: ledgerTokens.border,
+          },
+        },
+      },
+    },
+    MuiDialogActions: {
+      styleOverrides: {
+        root: {
+          padding: '12px 24px',
+          borderTop: `1px solid ${ledgerTokens.border}`,
         },
       },
     },
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 10,
-          fontWeight: 700,
-          transition: 'transform 140ms ease, box-shadow 180ms ease, background-color 180ms ease',
-          '&:hover': {
-            transform: 'translateY(-1px)',
-          },
+          height: 26,
+          borderRadius: 4,
+          fontSize: '0.75rem',
+          fontWeight: 500,
+        },
+      },
+    },
+    MuiMenu: {
+      styleOverrides: {
+        paper: {
+          border: `1px solid ${ledgerTokens.border}`,
+          borderRadius: 5,
+          boxShadow: '0 8px 24px rgba(23, 24, 23, 0.12)',
         },
       },
     },
     MuiMenuItem: {
       styleOverrides: {
         root: {
-          borderRadius: 10,
-          marginInline: 6,
-          marginBlock: 2,
-          transition: 'background-color 140ms ease, transform 140ms ease',
+          minHeight: 36,
+          fontSize: '0.8125rem',
+          borderRadius: 0,
           '&:hover': {
-            transform: 'translateX(1px)',
+            backgroundColor: ledgerTokens.hover,
           },
         },
       },
     },
-    MuiListItemButton: {
+    MuiTableContainer: {
       styleOverrides: {
         root: {
-          transition: 'background-color 150ms ease, color 150ms ease, transform 130ms ease',
-          '&:active': {
-            transform: 'scale(0.99)',
-          },
+          borderRadius: 0,
         },
       },
     },
@@ -194,13 +329,15 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiTableCell-root': {
-            backgroundColor: '#F7FAFF',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            fontSize: '0.74rem',
-            fontWeight: 800,
-            color: '#60708A',
-            borderBottom: '1px solid #DFE7F4',
+            backgroundColor: ledgerTokens.surfaceSecondary,
+            color: ledgerTokens.textSecondary,
+            fontSize: '0.71875rem',
+            lineHeight: 1.25,
+            fontWeight: 500,
+            letterSpacing: '0.045em',
+            textTransform: 'none',
+            borderBottom: `1px solid ${ledgerTokens.borderStrong}`,
+            whiteSpace: 'nowrap',
           },
         },
       },
@@ -208,17 +345,53 @@ export const theme = createTheme({
     MuiTableCell: {
       styleOverrides: {
         root: {
-          borderColor: '#EDF2FA',
+          padding: '11px 14px',
+          fontSize: '0.8125rem',
+          borderBottom: `1px solid ${ledgerTokens.border}`,
+        },
+        sizeSmall: {
+          padding: '8px 12px',
         },
       },
     },
     MuiTableRow: {
       styleOverrides: {
         root: {
-          transition: 'background-color 160ms ease, box-shadow 180ms ease',
-          '&:hover': {
-            backgroundColor: '#F8FBFF',
+          transition: 'background-color 140ms ease',
+          '&.MuiTableRow-hover:hover': {
+            backgroundColor: ledgerTokens.hover,
           },
+        },
+      },
+    },
+    MuiTablePagination: {
+      styleOverrides: {
+        toolbar: {
+          minHeight: 48,
+          fontSize: '0.75rem',
+        },
+        selectLabel: {
+          fontSize: '0.75rem',
+        },
+        displayedRows: {
+          fontFamily: numericFontFamily,
+          fontSize: '0.75rem',
+          fontVariantNumeric: 'tabular-nums',
+        },
+      },
+    },
+    MuiAlert: {
+      styleOverrides: {
+        root: {
+          borderRadius: 4,
+          border: `1px solid ${ledgerTokens.borderStrong}`,
+        },
+      },
+    },
+    MuiSkeleton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 2,
         },
       },
     },
