@@ -1,4 +1,5 @@
-import { Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, Typography } from '@mui/material'
+import { Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from '@mui/material'
+import { EmptyState } from '../ui/EmptyState'
 import type { Recipe } from '../../types/recipe'
 import { RecipeRow } from './RecipeRow'
 
@@ -77,16 +78,18 @@ export const RecipeTable = ({
           {isVisible('ingredientCount') && (
             <TableCell align="center">Ingredients</TableCell>
           )}
-          {isVisible('actions') && <TableCell align="center">Action</TableCell>}
+          {isVisible('actions') && <TableCell align="center">Actions</TableCell>}
         </TableRow>
       </TableHead>
       <TableBody>
         {recipes.length === 0 ? (
           <TableRow>
             <TableCell colSpan={Math.max(columnCount, 1)} align="center">
-              <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                No recipes match your current filters.
-              </Typography>
+              <EmptyState
+                title="No recipes found"
+                description="Adjust your search or add a new recipe."
+                minHeight={160}
+              />
             </TableCell>
           </TableRow>
         ) : (

@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -12,7 +11,6 @@ import {
   TableContainer,
   TablePagination,
   TextField,
-  Typography,
 } from '@mui/material'
 import { useSearchParams } from 'react-router-dom'
 import { getErrorMessage } from '../../api/error'
@@ -34,6 +32,9 @@ import {
   type SortOrder,
 } from '../../components/recipes/RecipeTable'
 import { GradientCard } from '../../components/ui/GradientCard'
+import { PageHeader } from '../../components/ui/PageHeader'
+import { SectionCard } from '../../components/ui/SectionCard'
+import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import {
   TableViewControls,
   type TableColumnOption,
@@ -296,9 +297,11 @@ export const RecipesPage = () => {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        Recipes
-      </Typography>
+      <PageHeader
+        title="Recipes"
+        subtitle="Manage dish formulas and keep margin visibility at serving level."
+        badgeLabel="Kitchen Formulas"
+      />
 
       <GradientCard
         title="Recipe Book"
@@ -342,49 +345,58 @@ export const RecipesPage = () => {
             />
           </Stack>
 
-          <TableContainer
-            sx={{
-              maxHeight: 460,
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
-              backgroundColor: 'rgba(255,255,255,0.72)',
-            }}
+          <SectionCard
+            title="Recipe Records"
+            subtitle="Manage formulas, inspect margins, and trigger cook actions."
+            padded={false}
           >
-            {isLoading ? (
-              <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
-                <CircularProgress size={28} />
-              </Stack>
-            ) : (
-              <RecipeTable
-                recipes={recipes}
-                visibleColumns={visibleColumns}
-                tableSize={density === 'compact' ? 'small' : 'medium'}
-                computeCostPerServing={computeCostPerServing}
-                onCook={handleOpenCook}
-                onView={handleOpenDetails}
-                onEdit={handleOpenEdit}
-                sortBy={sortBy}
-                sortOrder={sortOrder}
-                onRequestSort={handleRequestSort}
-              />
-            )}
-          </TableContainer>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="flex-end">
-            <TablePagination
-              component="div"
-              count={totalRecipes}
-              page={page}
-              onPageChange={(_event, newPage) => setPage(newPage)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(event) => {
-                setRowsPerPage(parseInt(event.target.value, 10))
-                setPage(0)
+            <TableContainer
+              sx={{
+                maxHeight: 460,
+                backgroundColor: 'rgba(255,255,255,0.72)',
               }}
-              rowsPerPageOptions={[5, 10, 20]}
-            />
-          </Stack>
+            >
+              {isLoading ? (
+                <TableSkeleton rows={7} />
+              ) : (
+                <RecipeTable
+                  recipes={recipes}
+                  visibleColumns={visibleColumns}
+                  tableSize={density === 'compact' ? 'small' : 'medium'}
+                  computeCostPerServing={computeCostPerServing}
+                  onCook={handleOpenCook}
+                  onView={handleOpenDetails}
+                  onEdit={handleOpenEdit}
+                  sortBy={sortBy}
+                  sortOrder={sortOrder}
+                  onRequestSort={handleRequestSort}
+                />
+              )}
+            </TableContainer>
+
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              justifyContent="flex-end"
+              sx={{
+                px: 1.2,
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <TablePagination
+                component="div"
+                count={totalRecipes}
+                page={page}
+                onPageChange={(_event, newPage) => setPage(newPage)}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setRowsPerPage(parseInt(event.target.value, 10))
+                  setPage(0)
+                }}
+                rowsPerPageOptions={[5, 10, 20]}
+              />
+            </Stack>
+          </SectionCard>
         </Stack>
       </GradientCard>
 
@@ -427,4 +439,3 @@ export const RecipesPage = () => {
     </Box>
   )
 }
-

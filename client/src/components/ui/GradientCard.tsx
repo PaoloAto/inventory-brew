@@ -21,18 +21,20 @@ interface GradientCardProps {
 export const GradientCard = ({ title, subtitle, accent = 'primary', rightContent, children }: GradientCardProps) => {
   return (
     <Paper
-      elevation={4}
+      elevation={0}
       sx={{
-        borderRadius: 4,
+        borderRadius: 3.2,
         overflow: 'hidden',
-        boxShadow: '0 18px 45px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.02)',
+        border: '1px solid',
+        borderColor: 'divider',
+        boxShadow: '0 14px 34px rgba(11, 34, 77, 0.10)',
         bgcolor: 'background.paper',
       }}
     >
       <Box
         sx={{
           px: 3,
-          py: 2,
+          py: 2.2,
           background: accentGradients[accent],
           color: 'common.white',
         }}

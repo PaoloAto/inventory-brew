@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   FormControl,
   InputLabel,
   MenuItem,
@@ -16,7 +15,6 @@ import {
   TablePagination,
   TableRow,
   TextField,
-  Typography,
 } from '@mui/material'
 import {
   listTransactions,
@@ -24,7 +22,11 @@ import {
   type InventoryTransactionType,
 } from '../../api/transactions'
 import { getErrorMessage } from '../../api/error'
+import { EmptyState } from '../../components/ui/EmptyState'
 import { GradientCard } from '../../components/ui/GradientCard'
+import { PageHeader } from '../../components/ui/PageHeader'
+import { SectionCard } from '../../components/ui/SectionCard'
+import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import { useAppSnackbar } from '../../context/snackbarContext'
 
 type TypeFilter = 'all' | InventoryTransactionType
@@ -117,9 +119,11 @@ export const TransactionsPage = () => {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        Transactions
-      </Typography>
+      <PageHeader
+        title="Transactions"
+        subtitle="Audit every stock movement with filterable operational history."
+        badgeLabel="Audit Trail"
+      />
 
       <GradientCard
         title="Inventory Movements"
@@ -223,87 +227,96 @@ export const TransactionsPage = () => {
             />
           </Stack>
 
-          <Box
-            sx={{
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 2,
-              overflow: 'auto',
-              maxHeight: 500,
-              backgroundColor: 'rgba(255,255,255,0.72)',
-            }}
+          <SectionCard
+            title="Movement Records"
+            subtitle="Chronological stock movements with reasons and references."
+            padded={false}
           >
-            {isLoading ? (
-              <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
-                <CircularProgress size={28} />
-              </Stack>
-            ) : rows.length === 0 ? (
-              <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
-                <Typography variant="body2" color="text.secondary">
-                  No transactions found for the selected filters.
-                </Typography>
-              </Stack>
-            ) : (
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Ingredient</TableCell>
-                    <TableCell align="center">Type</TableCell>
-                    <TableCell align="right">Quantity</TableCell>
-                    <TableCell align="right">Previous</TableCell>
-                    <TableCell align="right">New</TableCell>
-                    <TableCell>Reason</TableCell>
-                    <TableCell>Reference</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {rows.map((transaction) => (
-                    <TableRow key={transaction.id} hover>
-                      <TableCell>{formatDateTime(transaction.createdAt)}</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>
-                        {transaction.ingredient?.name ?? transaction.ingredientId}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          size="small"
-                          color={getTypeColor(transaction.type)}
-                          label={transaction.type}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell align="right">
-                        {transaction.quantity} {transaction.ingredient?.unit ?? ''}
-                      </TableCell>
-                      <TableCell align="right">{transaction.previousStock}</TableCell>
-                      <TableCell align="right">{transaction.newStock}</TableCell>
-                      <TableCell>{transaction.reason || 'No reason'}</TableCell>
-                      <TableCell>
-                        {transaction.reference
-                          ? `${transaction.reference.type}${transaction.reference.name ? `: ${transaction.reference.name}` : ''}`
-                          : '—'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </Box>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="flex-end">
-            <TablePagination
-              component="div"
-              count={totalRows}
-              page={page}
-              onPageChange={(_event, newPage) => setPage(newPage)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(event) => {
-                setRowsPerPage(parseInt(event.target.value, 10))
-                setPage(0)
+            <Box
+              sx={{
+                overflow: 'auto',
+                maxHeight: 500,
+                backgroundColor: 'rgba(255,255,255,0.72)',
               }}
-              rowsPerPageOptions={[5, 10, 20, 50]}
-            />
-          </Stack>
+            >
+              {isLoading ? (
+                <TableSkeleton rows={8} />
+              ) : rows.length === 0 ? (
+                <EmptyState
+                  title="No transactions found"
+                  description="Try adjusting your filters or date range."
+                  minHeight={180}
+                />
+              ) : (
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Ingredient</TableCell>
+                      <TableCell align="center">Type</TableCell>
+                      <TableCell align="right">Quantity</TableCell>
+                      <TableCell align="right">Previous</TableCell>
+                      <TableCell align="right">New</TableCell>
+                      <TableCell>Reason</TableCell>
+                      <TableCell>Reference</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((transaction) => (
+                      <TableRow key={transaction.id} hover>
+                        <TableCell>{formatDateTime(transaction.createdAt)}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>
+                          {transaction.ingredient?.name ?? transaction.ingredientId}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            size="small"
+                            color={getTypeColor(transaction.type)}
+                            label={transaction.type}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          {transaction.quantity} {transaction.ingredient?.unit ?? ''}
+                        </TableCell>
+                        <TableCell align="right">{transaction.previousStock}</TableCell>
+                        <TableCell align="right">{transaction.newStock}</TableCell>
+                        <TableCell>{transaction.reason || 'No reason'}</TableCell>
+                        <TableCell>
+                          {transaction.reference
+                            ? `${transaction.reference.type}${transaction.reference.name ? `: ${transaction.reference.name}` : ''}`
+                            : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Box>
+
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              justifyContent="flex-end"
+              sx={{
+                px: 1.2,
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <TablePagination
+                component="div"
+                count={totalRows}
+                page={page}
+                onPageChange={(_event, newPage) => setPage(newPage)}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setRowsPerPage(parseInt(event.target.value, 10))
+                  setPage(0)
+                }}
+                rowsPerPageOptions={[5, 10, 20, 50]}
+              />
+            </Stack>
+          </SectionCard>
         </Stack>
       </GradientCard>
     </Box>

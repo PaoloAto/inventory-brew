@@ -1,4 +1,5 @@
-import { Checkbox, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, Typography } from '@mui/material'
+import { Checkbox, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel } from '@mui/material'
+import { EmptyState } from '../ui/EmptyState'
 import type { Ingredient } from '../../types/ingredient'
 import { IngredientRow } from './IngredientRow'
 
@@ -106,16 +107,18 @@ export const IngredientTable = ({
             <TableCell align="right">Total Value</TableCell>
           )}
           {isVisible('status') && <TableCell>Status</TableCell>}
-          {isVisible('actions') && <TableCell align="center">Action</TableCell>}
+          {isVisible('actions') && <TableCell align="center">Actions</TableCell>}
         </TableRow>
       </TableHead>
       <TableBody>
         {ingredients.length === 0 ? (
           <TableRow>
             <TableCell colSpan={columnCount} align="center">
-              <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                No ingredients match your current filters.
-              </Typography>
+              <EmptyState
+                title="No ingredients found"
+                description="Try changing your filters or add a new ingredient."
+                minHeight={160}
+              />
             </TableCell>
           </TableRow>
         ) : (

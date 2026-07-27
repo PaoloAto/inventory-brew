@@ -1,7 +1,8 @@
-import { Chip, IconButton, TableCell, TableRow, Tooltip } from '@mui/material'
+import { Chip, TableCell, TableRow } from '@mui/material'
 import RestaurantIcon from '@mui/icons-material/Restaurant'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import EditIcon from '@mui/icons-material/Edit'
+import { RowActionMenu } from '../ui/RowActionMenu'
 import type { Recipe } from '../../types/recipe'
 import type { RecipeColumnKey } from './RecipeTable'
 
@@ -55,21 +56,29 @@ export const RecipeRow = ({
 
       {isVisible('actions') && (
         <TableCell align="center">
-          <Tooltip title="View details">
-            <IconButton size="small" sx={{ mr: 0.5 }} onClick={onView}>
-              <VisibilityIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Edit">
-            <IconButton size="small" sx={{ mr: 0.5 }} onClick={onEdit}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Cook">
-            <IconButton size="small" color="primary" onClick={onCook}>
-              <RestaurantIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          <RowActionMenu
+            tooltip={`Actions for ${recipe.name}`}
+            actions={[
+              {
+                key: 'view',
+                label: 'View details',
+                icon: <VisibilityIcon fontSize="small" />,
+                onClick: onView,
+              },
+              {
+                key: 'edit',
+                label: 'Edit recipe',
+                icon: <EditIcon fontSize="small" />,
+                onClick: onEdit,
+              },
+              {
+                key: 'cook',
+                label: 'Cook recipe',
+                icon: <RestaurantIcon fontSize="small" />,
+                onClick: onCook,
+              },
+            ]}
+          />
         </TableCell>
       )}
     </TableRow>

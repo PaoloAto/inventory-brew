@@ -3,12 +3,10 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Stack,
   TableContainer,
   TablePagination,
   TextField,
-  Typography,
 } from '@mui/material'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -28,6 +26,9 @@ import {
   type SortOrder,
 } from '../../components/inventory/IngredientTable'
 import { GradientCard } from '../../components/ui/GradientCard'
+import { PageHeader } from '../../components/ui/PageHeader'
+import { SectionCard } from '../../components/ui/SectionCard'
+import { TableSkeleton } from '../../components/ui/TableSkeleton'
 import {
   TableViewControls,
   type TableColumnOption,
@@ -322,9 +323,11 @@ export const IngredientsPage = () => {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        Ingredients
-      </Typography>
+      <PageHeader
+        title="Ingredients"
+        subtitle="Track stock-on-hand, costs, and reorder pressure in real time."
+        badgeLabel="Live Inventory"
+      />
 
       <GradientCard
         title="Ingredients Inventory"
@@ -403,64 +406,70 @@ export const IngredientsPage = () => {
             ))}
           </Stack>
 
-          <TableContainer
-            sx={{
-              maxHeight: 460,
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
-              backgroundColor: 'rgba(255,255,255,0.72)',
-            }}
+          <SectionCard
+            title="Ingredient Records"
+            subtitle="Use row actions to adjust stock or edit details."
+            padded={false}
           >
-            {isLoading ? (
-              <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
-                <CircularProgress size={28} />
-              </Stack>
-            ) : (
-              <IngredientTable
-                ingredients={ingredients}
-                selectedIds={selectedIds}
-                visibleColumns={visibleColumns}
-                tableSize={density === 'compact' ? 'small' : 'medium'}
-                onToggleSelect={handleToggleSelect}
-                onToggleSelectAll={handleToggleSelectAll}
-                onEdit={openEditDialog}
-                onAdjustStock={handleAdjustStock}
-                sortBy={sortBy}
-                sortOrder={sortOrder}
-                onRequestSort={handleRequestSort}
-              />
-            )}
-          </TableContainer>
-
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            justifyContent="space-between"
-            alignItems={{ xs: 'stretch', sm: 'center' }}
-          >
-            <Button
-              variant="outlined"
-              color="error"
-              disabled={selectedIds.length === 0}
-              onClick={handleDeleteSelected}
-              sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}
-            >
-              Archive selected
-            </Button>
-
-            <TablePagination
-              component="div"
-              count={totalIngredients}
-              page={page}
-              onPageChange={(_event, newPage) => setPage(newPage)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(event) => {
-                setRowsPerPage(parseInt(event.target.value, 10))
-                setPage(0)
+            <TableContainer
+              sx={{
+                maxHeight: 460,
+                backgroundColor: 'rgba(255,255,255,0.72)',
               }}
-              rowsPerPageOptions={[5, 10, 20]}
-            />
-          </Stack>
+            >
+              {isLoading ? (
+                <TableSkeleton rows={7} />
+              ) : (
+                <IngredientTable
+                  ingredients={ingredients}
+                  selectedIds={selectedIds}
+                  visibleColumns={visibleColumns}
+                  tableSize={density === 'compact' ? 'small' : 'medium'}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleSelectAll={handleToggleSelectAll}
+                  onEdit={openEditDialog}
+                  onAdjustStock={handleAdjustStock}
+                  sortBy={sortBy}
+                  sortOrder={sortOrder}
+                  onRequestSort={handleRequestSort}
+                />
+              )}
+            </TableContainer>
+
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              justifyContent="space-between"
+              alignItems={{ xs: 'stretch', sm: 'center' }}
+              sx={{
+                px: 1.2,
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <Button
+                variant="outlined"
+                color="error"
+                disabled={selectedIds.length === 0}
+                onClick={handleDeleteSelected}
+                sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, ml: 1.2 }}
+              >
+                Archive selected
+              </Button>
+
+              <TablePagination
+                component="div"
+                count={totalIngredients}
+                page={page}
+                onPageChange={(_event, newPage) => setPage(newPage)}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setRowsPerPage(parseInt(event.target.value, 10))
+                  setPage(0)
+                }}
+                rowsPerPageOptions={[5, 10, 20]}
+              />
+            </Stack>
+          </SectionCard>
         </Stack>
       </GradientCard>
 
@@ -473,4 +482,3 @@ export const IngredientsPage = () => {
     </Box>
   )
 }
-

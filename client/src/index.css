@@ -1,5 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
 :root {
   color-scheme: light;
+  --app-background: #f1f4fb;
+  --surface-0: #ffffff;
+  --surface-border: #e7ecf5;
+  --text-main: #0f1e38;
+  --text-muted: #5d6b83;
+  --focus-ring: #2d7ff9;
 }
 
 * {
@@ -8,13 +16,18 @@
 
 body {
   margin: 0;
-  font-family: Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f5f7fb;
-  color: #1f2933;
+  font-family: Manrope, 'Avenir Next', 'Segoe UI', sans-serif;
+  background: var(--app-background);
+  color: var(--text-main);
+}
+
+:where(button, a, input, select, textarea, [role='button']):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 a {
-  color: #0d6efd;
+  color: #2d7ff9;
   text-decoration: none;
 }
 
@@ -24,6 +37,27 @@ a:hover {
 
 .app-container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1320px;
   margin: 0 auto;
+}
+
+.route-content-enter {
+  animation: routeFadeIn 220ms ease-out;
+}
+
+@keyframes routeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-content-enter {
+    animation: none;
+  }
 }

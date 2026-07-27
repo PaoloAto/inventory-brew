@@ -1,7 +1,8 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import EditIcon from '@mui/icons-material/Edit'
 import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded'
-import { Chip, Checkbox, IconButton, Stack, TableCell, TableRow, Tooltip, Typography } from '@mui/material'
+import { Chip, Checkbox, TableCell, TableRow, Typography } from '@mui/material'
+import { RowActionMenu } from '../ui/RowActionMenu'
 import type { Ingredient } from '../../types/ingredient'
 import type { IngredientColumnKey } from './IngredientTable'
 
@@ -69,30 +70,30 @@ export const IngredientRow = ({
       )}
       {isVisible('actions') && (
         <TableCell align="center">
-          <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
-            <Tooltip title="Decrease stock">
-              <span>
-                <IconButton
-                  size="small"
-                  color="warning"
-                  onClick={() => onAdjustStock(ingredient, -1)}
-                  disabled={ingredient.stockQuantity <= 0}
-                >
-                  <RemoveRoundedIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="Increase stock">
-              <IconButton size="small" color="success" onClick={() => onAdjustStock(ingredient, 1)}>
-                <AddRoundedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Edit ingredient">
-              <IconButton size="small" onClick={() => onEdit(ingredient)}>
-                <EditIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
+          <RowActionMenu
+            tooltip={`Actions for ${ingredient.name}`}
+            actions={[
+              {
+                key: 'increase',
+                label: 'Increase stock',
+                icon: <AddRoundedIcon fontSize="small" />,
+                onClick: () => onAdjustStock(ingredient, 1),
+              },
+              {
+                key: 'decrease',
+                label: 'Decrease stock',
+                icon: <RemoveRoundedIcon fontSize="small" />,
+                onClick: () => onAdjustStock(ingredient, -1),
+                disabled: ingredient.stockQuantity <= 0,
+              },
+              {
+                key: 'edit',
+                label: 'Edit ingredient',
+                icon: <EditIcon fontSize="small" />,
+                onClick: () => onEdit(ingredient),
+              },
+            ]}
+          />
         </TableCell>
       )}
     </TableRow>

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import {
   AppBar,
   Avatar,
+  Badge,
   Box,
   Drawer,
   IconButton,
@@ -10,6 +11,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Tooltip,
   Toolbar,
   Typography,
   useMediaQuery,
@@ -20,10 +22,10 @@ import DashboardIcon from '@mui/icons-material/Dashboard'
 import Inventory2Icon from '@mui/icons-material/Inventory2'
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu'
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded'
+import NotificationsRoundedIcon from '@mui/icons-material/NotificationsRounded'
 import { NavLink, useLocation } from 'react-router-dom'
-import './layout.css'
 
-const drawerWidth = 232
+const drawerWidth = 248
 
 interface AppLayoutProps {
   children: ReactNode
@@ -51,10 +53,33 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
 
   const drawerContent = (
     <>
-      <Toolbar />
+      <Toolbar sx={{ minHeight: '72px !important', alignItems: 'center', px: 2 }}>
+        <Box
+          sx={{
+            width: '100%',
+            borderRadius: 2.5,
+            px: 1.5,
+            py: 1.25,
+            background: 'linear-gradient(145deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04))',
+            border: '1px solid rgba(255,255,255,0.14)',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 0.25 }}>
+            Inventory Brew
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'rgba(231, 236, 247, 0.72)' }}>
+            Restaurant Ops Console
+          </Typography>
+        </Box>
+      </Toolbar>
       <List sx={{ mt: 1.5 }}>
         {navItems.map((item) => {
-          const selected = location.pathname === item.to
+          const selected =
+            item.to === '/'
+              ? location.pathname === item.to
+              : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+
           return (
             <ListItemButton
               key={item.to}
@@ -66,10 +91,10 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
                 mb: 0.75,
                 borderRadius: 99,
                 color: selected ? 'common.white' : '#c9d1df',
-                background: selected ? 'linear-gradient(90deg, #1A73E8, #42A5F5)' : 'transparent',
+                background: selected ? 'linear-gradient(90deg, #2D7FF9, #57B0FF)' : 'transparent',
                 '&.active': {
                   color: 'common.white',
-                  background: 'linear-gradient(90deg, #1A73E8, #42A5F5)',
+                  background: 'linear-gradient(90deg, #2D7FF9, #57B0FF)',
                   '& .MuiListItemIcon-root': { color: 'inherit' },
                 },
                 '&:hover': {
@@ -96,28 +121,37 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         color="transparent"
         sx={{
           zIndex: (muiTheme) => muiTheme.zIndex.drawer + 1,
-          borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
-          bgcolor: 'rgba(255,255,255,0.9)',
-          backdropFilter: 'blur(14px)',
+          borderBottom: '1px solid rgba(15, 23, 42, 0.09)',
+          bgcolor: 'rgba(255,255,255,0.84)',
+          backdropFilter: 'blur(16px)',
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between', px: 2.5 }}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1.5, md: 2.5 }, minHeight: '72px !important' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
             {!isDesktop && (
               <IconButton edge="start" color="primary" onClick={() => setMobileOpen(true)} aria-label="open navigation">
                 <MenuRoundedIcon />
               </IconButton>
             )}
-            <Typography variant="h6" noWrap sx={{ fontWeight: 700 }}>
-              Inventory Brew
+            <Typography variant="h6" noWrap sx={{ fontWeight: 800 }}>
+              Operations Dashboard
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-            <Typography variant="body2" color="text.secondary">
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.4 }}>
+            <Tooltip title="Notifications">
+              <IconButton sx={{ color: 'text.secondary' }} aria-label="notifications">
+                <Badge color="error" variant="dot">
+                  <NotificationsRoundedIcon fontSize="small" />
+                </Badge>
+              </IconButton>
+            </Tooltip>
+            <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>
               Hello, Chef
             </Typography>
-            <Avatar sx={{ width: 32, height: 32, fontSize: 13, bgcolor: 'primary.main' }}>IB</Avatar>
+            <Avatar sx={{ width: 34, height: 34, fontSize: 13, bgcolor: 'primary.main', boxShadow: '0 8px 20px rgba(45,127,249,0.35)' }}>
+              IB
+            </Avatar>
           </Box>
         </Toolbar>
       </AppBar>
@@ -132,9 +166,11 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
               width: drawerWidth,
               boxSizing: 'border-box',
               borderRight: 'none',
-              bgcolor: '#10141f',
+              bgcolor: '#0E1524',
               color: '#fff',
-              backgroundImage: 'linear-gradient(180deg, #10141f 0%, #060a12 100%)',
+              backgroundImage:
+                'linear-gradient(180deg, #111C33 0%, #0A1427 54%, #07111F 100%)',
+              boxShadow: '8px 0 34px rgba(7, 13, 24, 0.28)',
             },
           }}
         >
@@ -151,9 +187,10 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
               width: drawerWidth,
               boxSizing: 'border-box',
               borderRight: 'none',
-              bgcolor: '#10141f',
+              bgcolor: '#0E1524',
               color: '#fff',
-              backgroundImage: 'linear-gradient(180deg, #10141f 0%, #060a12 100%)',
+              backgroundImage:
+                'linear-gradient(180deg, #111C33 0%, #0A1427 54%, #07111F 100%)',
             },
           }}
         >
@@ -165,12 +202,15 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3 },
-          mt: 9,
+          px: { xs: 2, md: 3.5 },
+          py: { xs: 2, md: 3 },
+          mt: '74px',
           minHeight: '100vh',
         }}
       >
-        {children}
+        <Box key={location.pathname} className="app-container route-content-enter">
+          {children}
+        </Box>
       </Box>
     </Box>
   )
