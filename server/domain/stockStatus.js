@@ -9,15 +9,21 @@ const STOCK_STATUS = {
 const CRITICAL_STOCK_RATIO = 0.25
 
 const calculateStockStatus = ({ stockQuantity, reorderLevel }) => {
-  if (stockQuantity <= 0) {
+  const parsedStock = Number(stockQuantity)
+  const parsedReorder = Number(reorderLevel)
+  const normalizedStock = Number.isFinite(parsedStock) ? parsedStock : 0
+  const normalizedReorder =
+    Number.isFinite(parsedReorder) && parsedReorder > 0 ? parsedReorder : 0
+
+  if (normalizedStock <= 0) {
     return {
       code: STOCK_STATUS.OUT_OF_STOCK,
-      stockRatio: reorderLevel > 0 ? stockQuantity / reorderLevel : null,
-      shortfall: reorderLevel > 0 ? Math.max(reorderLevel - stockQuantity, 0) : null,
+      stockRatio: normalizedReorder > 0 ? 0 : null,
+      shortfall: normalizedReorder > 0 ? normalizedReorder : null,
     }
   }
 
-  if (reorderLevel <= 0) {
+  if (normalizedReorder <= 0) {
     return {
       code: STOCK_STATUS.UNCONFIGURED,
       stockRatio: null,
@@ -25,14 +31,14 @@ const calculateStockStatus = ({ stockQuantity, reorderLevel }) => {
     }
   }
 
-  const stockRatio = stockQuantity / reorderLevel
-  const shortfall = Math.max(reorderLevel - stockQuantity, 0)
+  const stockRatio = normalizedStock / normalizedReorder
+  const shortfall = Math.max(normalizedReorder - normalizedStock, 0)
 
   if (stockRatio <= CRITICAL_STOCK_RATIO) {
     return { code: STOCK_STATUS.CRITICAL, stockRatio, shortfall }
   }
 
-  if (stockQuantity <= reorderLevel) {
+  if (normalizedStock <= normalizedReorder) {
     return { code: STOCK_STATUS.LOW, stockRatio, shortfall }
   }
 

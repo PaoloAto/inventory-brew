@@ -71,10 +71,10 @@ export const DashboardPage = () => {
     lowStockCount: 0,
     outOfStockCount: 0,
     criticalStockCount: 0,
+    lowOnlyCount: 0,
     unconfiguredReorderCount: 0,
     sufficientStockCount: 0,
     replenishmentRequiredCount: 0,
-    legacyLowStockCount: 0,
     totalStockValue: 0,
   }
   const lowStockItems = data?.lowStockItems ?? []

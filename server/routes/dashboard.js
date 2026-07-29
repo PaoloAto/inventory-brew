@@ -108,7 +108,7 @@ router.get('/summary', async (req, res) => {
     const statusCounts = {
       outOfStockCount: 0,
       criticalStockCount: 0,
-      lowStockCount: 0,
+      lowOnlyCount: 0,
       unconfiguredReorderCount: 0,
       sufficientStockCount: 0,
       replenishmentRequiredCount: 0,
@@ -119,12 +119,12 @@ router.get('/summary', async (req, res) => {
 
       if (stockStatus.code === STOCK_STATUS.OUT_OF_STOCK) statusCounts.outOfStockCount += 1
       if (stockStatus.code === STOCK_STATUS.CRITICAL) statusCounts.criticalStockCount += 1
-      if (stockStatus.code === STOCK_STATUS.LOW) statusCounts.lowStockCount += 1
+      if (stockStatus.code === STOCK_STATUS.LOW) statusCounts.lowOnlyCount += 1
       if (stockStatus.code === STOCK_STATUS.UNCONFIGURED) statusCounts.unconfiguredReorderCount += 1
       if (stockStatus.code === STOCK_STATUS.SUFFICIENT) statusCounts.sufficientStockCount += 1
 
       if (
-        (stockStatus.code === STOCK_STATUS.OUT_OF_STOCK && ingredient.reorderLevel > 0) ||
+        (stockStatus.code === STOCK_STATUS.OUT_OF_STOCK && stockStatus.shortfall !== null) ||
         stockStatus.code === STOCK_STATUS.CRITICAL ||
         stockStatus.code === STOCK_STATUS.LOW
       ) {
@@ -178,8 +178,7 @@ router.get('/summary', async (req, res) => {
         recipeCount,
         totalStockValue: Number(totalStockValue.toFixed(4)),
         ...statusCounts,
-        // Compatibility alias for the previous combined low-stock count.
-        legacyLowStockCount: statusCounts.replenishmentRequiredCount,
+        lowStockCount: statusCounts.replenishmentRequiredCount,
       },
       lowStockItems,
       recentTransactions,

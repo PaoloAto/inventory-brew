@@ -7,10 +7,10 @@ export interface DashboardSummary {
   lowStockCount: number
   outOfStockCount: number
   criticalStockCount: number
+  lowOnlyCount: number
   unconfiguredReorderCount: number
   sufficientStockCount: number
   replenishmentRequiredCount: number
-  legacyLowStockCount: number
   totalStockValue: number
 }
 

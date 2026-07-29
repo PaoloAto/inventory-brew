@@ -273,7 +273,7 @@ export const IngredientsPage = () => {
           void (async () => {
             try {
               await Promise.all(idsToArchive.map((id) => restoreIngredient(id)))
-              await loadIngredients()
+              await Promise.all([loadIngredients(), loadIngredientMeta()])
               showSnackbar('Ingredients restored', { severity: 'success' })
             } catch (error) {
               showSnackbar(getErrorMessage(error, 'Failed to restore ingredients'), { severity: 'error' })
@@ -281,7 +281,7 @@ export const IngredientsPage = () => {
           })()
         },
       })
-      await loadIngredients()
+      await Promise.all([loadIngredients(), loadIngredientMeta()])
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to archive ingredients'), { severity: 'error' })
     }

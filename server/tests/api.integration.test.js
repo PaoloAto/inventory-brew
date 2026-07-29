@@ -239,6 +239,33 @@ describe('Inventory Brew API integration', () => {
     expect(calculateStockStatus({ stockQuantity: 2.5, reorderLevel: 10 }).code).toBe('CRITICAL')
     expect(calculateStockStatus({ stockQuantity: 10, reorderLevel: 10 }).code).toBe('LOW')
     expect(calculateStockStatus({ stockQuantity: 10.01, reorderLevel: 10 }).code).toBe('SUFFICIENT')
+
+    expect(calculateStockStatus({ stockQuantity: 5, reorderLevel: undefined })).toMatchObject({
+      code: 'UNCONFIGURED',
+      stockRatio: null,
+      shortfall: null,
+    })
+    expect(calculateStockStatus({ stockQuantity: 5, reorderLevel: Number.NaN }).code).toBe(
+      'UNCONFIGURED',
+    )
+    expect(calculateStockStatus({ stockQuantity: undefined, reorderLevel: 10 })).toMatchObject({
+      code: 'OUT_OF_STOCK',
+      stockRatio: 0,
+      shortfall: 10,
+    })
+    expect(calculateStockStatus({ stockQuantity: 0, reorderLevel: undefined }).code).toBe(
+      'OUT_OF_STOCK',
+    )
+
+    const malformedResults = [
+      calculateStockStatus({ stockQuantity: Number.NaN, reorderLevel: 10 }),
+      calculateStockStatus({ stockQuantity: Number.POSITIVE_INFINITY, reorderLevel: 10 }),
+      calculateStockStatus({ stockQuantity: 5, reorderLevel: Number.POSITIVE_INFINITY }),
+    ]
+    malformedResults.forEach((result) => {
+      const numericFields = [result.stockRatio, result.shortfall].filter((value) => value !== null)
+      numericFields.forEach((value) => expect(Number.isFinite(value)).toBe(true))
+    })
   })
 
   test('ingredient metadata returns the complete active category catalog', async () => {
@@ -398,6 +425,57 @@ describe('Inventory Brew API integration', () => {
     expect(restoreResponse.body.recipe.isActive).toBe(true)
   })
 
+  test('GET /api/dashboard/summary preserves replenishment count compatibility', async () => {
+    await Ingredient.insertMany([
+      {
+        name: 'Configured out',
+        unit: 'pcs',
+        stockQuantity: 0,
+        costPerUnit: 1,
+        reorderLevel: 10,
+      },
+      {
+        name: 'Unconfigured out',
+        unit: 'pcs',
+        stockQuantity: 0,
+        costPerUnit: 1,
+        reorderLevel: 0,
+      },
+      {
+        name: 'Critical',
+        unit: 'pcs',
+        stockQuantity: 2.5,
+        costPerUnit: 1,
+        reorderLevel: 10,
+      },
+      { name: 'Low', unit: 'pcs', stockQuantity: 5, costPerUnit: 1, reorderLevel: 10 },
+      { name: 'Sufficient', unit: 'pcs', stockQuantity: 11, costPerUnit: 1, reorderLevel: 10 },
+      {
+        name: 'Unconfigured positive',
+        unit: 'pcs',
+        stockQuantity: 5,
+        costPerUnit: 1,
+        reorderLevel: 0,
+      },
+    ])
+
+    const response = await request(app).get('/api/dashboard/summary')
+
+    expect(response.status).toBe(200)
+    expect(response.body.summary).toMatchObject({
+      outOfStockCount: 2,
+      criticalStockCount: 1,
+      lowOnlyCount: 1,
+      lowStockCount: 3,
+      unconfiguredReorderCount: 1,
+      sufficientStockCount: 1,
+      replenishmentRequiredCount: 3,
+    })
+    expect(response.body.summary.lowStockCount).toBe(
+      response.body.summary.replenishmentRequiredCount,
+    )
+  })
+
   test('GET /api/dashboard/summary returns expected summary shape', async () => {
     await request(app).post('/api/ingredients').send({
       name: 'Rice',
@@ -417,11 +495,13 @@ describe('Inventory Brew API integration', () => {
     expect(response.body.summary).toMatchObject({
       outOfStockCount: 0,
       criticalStockCount: 0,
+      lowOnlyCount: 0,
       lowStockCount: 0,
       unconfiguredReorderCount: 0,
       sufficientStockCount: 1,
       replenishmentRequiredCount: 0,
     })
+    expect(response.body.summary).not.toHaveProperty('legacyLowStockCount')
     expect(response.body.summary).toHaveProperty('totalStockValue')
     expect(Array.isArray(response.body.lowStockItems)).toBe(true)
     expect(Array.isArray(response.body.recentTransactions)).toBe(true)
