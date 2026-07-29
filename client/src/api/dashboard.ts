@@ -1,9 +1,16 @@
 import { request } from './http'
+import type { StockStatus } from '../types/ingredient'
 
 export interface DashboardSummary {
   ingredientCount: number
   recipeCount: number
   lowStockCount: number
+  outOfStockCount: number
+  criticalStockCount: number
+  unconfiguredReorderCount: number
+  sufficientStockCount: number
+  replenishmentRequiredCount: number
+  legacyLowStockCount: number
   totalStockValue: number
 }
 
@@ -14,6 +21,7 @@ export interface LowStockItem {
   stockQuantity: number
   reorderLevel: number
   shortfall: number
+  stockStatus: StockStatus
   stockValue: number
   isActive: boolean
 }

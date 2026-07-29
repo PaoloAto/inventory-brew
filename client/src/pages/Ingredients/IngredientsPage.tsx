@@ -17,6 +17,7 @@ import {
   adjustIngredientStock,
   archiveIngredient,
   createIngredient,
+  getIngredientMeta,
   listIngredients,
   restoreIngredient,
   updateIngredient,
@@ -129,14 +130,6 @@ export const IngredientsPage = () => {
       setSelectedIds((previous) =>
         previous.filter((id) => response.items.some((item) => item.id === id)),
       )
-      setCategoryOptions((previous) => {
-        const merged = new Set(previous)
-        response.items.forEach((item) => {
-          if (item.category?.trim()) merged.add(item.category.trim())
-        })
-        if (categoryFilter !== 'all') merged.add(categoryFilter)
-        return [...merged].sort((a, b) => a.localeCompare(b))
-      })
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to load ingredients'), { severity: 'error' })
     } finally {
@@ -144,9 +137,24 @@ export const IngredientsPage = () => {
     }
   }, [categoryFilter, debouncedSearch, page, rowsPerPage, showSnackbar, sortBy, sortOrder, stockFilter])
 
+  const loadIngredientMeta = useCallback(async () => {
+    try {
+      const meta = await getIngredientMeta()
+      setCategoryOptions(meta.categories.map((category) => category.name))
+    } catch (error) {
+      showSnackbar(getErrorMessage(error, 'Failed to load ingredient categories'), {
+        severity: 'error',
+      })
+    }
+  }, [showSnackbar])
+
   useEffect(() => {
     void loadIngredients()
   }, [loadIngredients])
+
+  useEffect(() => {
+    void loadIngredientMeta()
+  }, [loadIngredientMeta])
 
   useEffect(() => {
     setPage(0)
@@ -208,18 +216,10 @@ export const IngredientsPage = () => {
           name: input.name,
           manufacturer: input.manufacturer,
           category: input.category,
-          unit: input.unit,
           costPerUnit: input.costPerUnit,
           reorderLevel: input.reorderLevel,
           isActive: input.isActive,
         })
-        if (input.stockQuantity !== editing.stockQuantity) {
-          await adjustIngredientStock(input.id, {
-            type: 'ADJUST',
-            newStockQuantity: input.stockQuantity,
-            reason: 'Adjusted from ingredient form',
-          })
-        }
         showSnackbar('Ingredient updated', { severity: 'success' })
       } else {
         await createIngredient({
@@ -235,12 +235,9 @@ export const IngredientsPage = () => {
         showSnackbar('Ingredient added', { severity: 'success' })
       }
 
-      if (input.category?.trim()) {
-        setCategoryOptions((previous) => [...new Set([...previous, input.category!.trim()])].sort())
-      }
       setDialogOpen(false)
       setEditing(null)
-      await loadIngredients()
+      await Promise.all([loadIngredients(), loadIngredientMeta()])
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to save ingredient'), { severity: 'error' })
     } finally {

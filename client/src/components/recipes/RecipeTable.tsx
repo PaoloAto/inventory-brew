@@ -19,7 +19,6 @@ interface RecipeTableProps {
   recipes: Recipe[]
   visibleColumns: RecipeColumnKey[]
   tableSize: 'small' | 'medium'
-  computeCostPerServing: (ingredients: Recipe['ingredients']) => number
   onCook: (recipe: Recipe) => void
   onView: (recipe: Recipe) => void
   onEdit: (recipe: Recipe) => void
@@ -32,7 +31,6 @@ export const RecipeTable = ({
   recipes,
   visibleColumns,
   tableSize,
-  computeCostPerServing,
   onCook,
   onView,
   onEdit,
@@ -102,7 +100,6 @@ export const RecipeTable = ({
               key={recipe.id}
               recipe={recipe}
               visibleColumns={visibleColumns}
-              computeCostPerServing={computeCostPerServing}
               onCook={() => onCook(recipe)}
               onView={() => onView(recipe)}
               onEdit={() => onEdit(recipe)}

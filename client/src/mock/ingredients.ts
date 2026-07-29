@@ -9,6 +9,7 @@ export const mockIngredients: Ingredient[] = [
     stockQuantity: 30,
     costPerUnit: 3.5,
     reorderLevel: 10,
+    stockStatus: { code: 'SUFFICIENT', stockRatio: 3, shortfall: 0 },
     isActive: true,
   },
   {
@@ -19,6 +20,7 @@ export const mockIngredients: Ingredient[] = [
     stockQuantity: 5000,
     costPerUnit: 0.12,
     reorderLevel: 1200,
+    stockStatus: { code: 'SUFFICIENT', stockRatio: 4.166666666666667, shortfall: 0 },
     isActive: true,
   },
   {
@@ -29,6 +31,7 @@ export const mockIngredients: Ingredient[] = [
     stockQuantity: 3200,
     costPerUnit: 0.03,
     reorderLevel: 600,
+    stockStatus: { code: 'SUFFICIENT', stockRatio: 5.333333333333333, shortfall: 0 },
     isActive: true,
   },
 ]

@@ -1,5 +1,9 @@
 import type { Unit } from '../types/ingredient'
-import type { Recipe } from '../types/recipe'
+import type {
+  Recipe,
+  RecipeComputedMetrics,
+  RecipeConfiguration,
+} from '../types/recipe'
 import { request, type PaginatedResponse } from './http'
 
 interface RecipeIngredientDTO {
@@ -14,6 +18,8 @@ interface RecipeDTO {
   description?: string
   sellingPrice: number
   ingredients: RecipeIngredientDTO[]
+  computed?: RecipeComputedMetrics | null
+  configuration?: RecipeConfiguration
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -26,20 +32,15 @@ export interface RecipeIngredientDetail {
   ingredientIsActive: boolean
   quantity: number
   unit: Unit
-  costPerUnit: number
-  costContribution: number
-}
-
-export interface RecipeComputedMetrics {
-  costPerServing: number
-  margin: number
-  marginPercent: number
+  costPerUnit: number | null
+  costContribution: number | null
 }
 
 export interface RecipeDetails {
   recipe: Recipe
   ingredientDetails: RecipeIngredientDetail[]
-  computed?: RecipeComputedMetrics
+  computed?: RecipeComputedMetrics | null
+  configuration?: RecipeConfiguration
 }
 
 export interface RecipeQuery {
@@ -106,6 +107,8 @@ const toRecipe = (dto: RecipeDTO): Recipe => ({
     quantity: line.quantity,
     unit: line.unit,
   })),
+  computed: dto.computed,
+  configuration: dto.configuration,
   isActive: dto.isActive,
 })
 
@@ -125,7 +128,8 @@ export const getRecipeDetails = async (id: string, includeInactive = false): Pro
   const response = await request<{
     recipe: RecipeDTO
     ingredientDetails: RecipeIngredientDetail[]
-    computed?: RecipeComputedMetrics
+    computed?: RecipeComputedMetrics | null
+    configuration?: RecipeConfiguration
   }>(`/recipes/${id}`, {
     method: 'GET',
     query: {
@@ -138,6 +142,7 @@ export const getRecipeDetails = async (id: string, includeInactive = false): Pro
     recipe: toRecipe(response.recipe),
     ingredientDetails: response.ingredientDetails,
     computed: response.computed,
+    configuration: response.configuration,
   }
 }
 

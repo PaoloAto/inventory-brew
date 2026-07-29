@@ -1,4 +1,4 @@
-import type { Ingredient, Unit } from '../types/ingredient'
+import type { Ingredient, StockStatus, Unit } from '../types/ingredient'
 import { request, type PaginatedResponse } from './http'
 
 interface IngredientDTO {
@@ -10,6 +10,7 @@ interface IngredientDTO {
   stockQuantity: number
   costPerUnit: number
   reorderLevel?: number
+  stockStatus: StockStatus
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -64,6 +65,14 @@ export interface IngredientUpdatePayload {
   isActive?: boolean
 }
 
+export interface IngredientMeta {
+  categories: Array<{
+    name: string
+    activeCount: number
+  }>
+  units: Unit[]
+}
+
 export type AdjustStockPayload =
   | {
       type: 'IN' | 'OUT'
@@ -87,8 +96,12 @@ const toIngredient = (dto: IngredientDTO): Ingredient => ({
   stockQuantity: dto.stockQuantity,
   costPerUnit: dto.costPerUnit,
   reorderLevel: dto.reorderLevel,
+  stockStatus: dto.stockStatus,
   isActive: dto.isActive,
 })
+
+export const getIngredientMeta = (): Promise<IngredientMeta> =>
+  request<IngredientMeta>('/ingredients/meta', { method: 'GET' })
 
 export const listIngredients = async (
   query: IngredientQuery = {},

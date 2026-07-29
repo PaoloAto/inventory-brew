@@ -27,17 +27,14 @@ export const IngredientRow = ({
   onAdjustStock,
 }: IngredientRowProps) => {
   const totalValue = ingredient.stockQuantity * ingredient.costPerUnit
-  const isLowStock =
-    ingredient.reorderLevel !== undefined
-      ? ingredient.stockQuantity < ingredient.reorderLevel
-      : ingredient.stockQuantity <= 3
-  const isCritical =
-    ingredient.stockQuantity <= 0 ||
-    (ingredient.reorderLevel !== undefined &&
-      ingredient.reorderLevel > 0 &&
-      ingredient.stockQuantity / ingredient.reorderLevel <= 0.25)
-
   const isVisible = (column: IngredientColumnKey) => visibleColumns.includes(column)
+  const statusPresentation = {
+    OUT_OF_STOCK: { label: 'Out of stock', tone: 'danger' as const },
+    UNCONFIGURED: { label: 'Set reorder point', tone: 'neutral' as const },
+    CRITICAL: { label: 'Critical', tone: 'danger' as const },
+    LOW: { label: 'Low stock', tone: 'warning' as const },
+    SUFFICIENT: { label: 'Sufficient', tone: 'success' as const },
+  }[ingredient.stockStatus.code]
 
   return (
     <TableRow hover>
@@ -67,7 +64,7 @@ export const IngredientRow = ({
             </Typography>
             <StockRunway
               current={ingredient.stockQuantity}
-              reorderLevel={ingredient.reorderLevel}
+              stockStatus={ingredient.stockStatus}
               unit={ingredient.unit}
               compact
             />
@@ -82,8 +79,8 @@ export const IngredientRow = ({
       {isVisible('status') && (
         <TableCell>
           <StatusLabel
-            label={isCritical ? 'Critical' : isLowStock ? 'Low stock' : 'On target'}
-            tone={isCritical ? 'danger' : isLowStock ? 'warning' : 'success'}
+            label={statusPresentation.label}
+            tone={statusPresentation.tone}
           />
         </TableCell>
       )}

@@ -1,4 +1,5 @@
 const express = require('express')
+const { calculateStockStatus, STOCK_STATUS } = require('../domain/stockStatus')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
@@ -45,7 +46,9 @@ const mapRecentTransactions = async (items) => {
 
   const [ingredientDocs, recipeDocs] = await Promise.all([
     Ingredient.find({ _id: { $in: ingredientIds } }).select('name unit isActive').lean(),
-    recipeReferenceIds.length > 0 ? Recipe.find({ _id: { $in: recipeReferenceIds } }).select('name isActive').lean() : [],
+    recipeReferenceIds.length > 0
+      ? Recipe.find({ _id: { $in: recipeReferenceIds } }).select('name isActive').lean()
+      : [],
   ])
 
   const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
@@ -81,90 +84,104 @@ const mapRecentTransactions = async (items) => {
 // GET /api/dashboard/summary - dashboard metrics and lightweight widgets
 router.get('/summary', async (req, res) => {
   try {
-    const lowStockLimit = Math.min(parsePositiveInt(req.query.lowStockLimit, DEFAULT_LOW_STOCK_LIMIT), MAX_LIMIT)
+    const lowStockLimit = Math.min(
+      parsePositiveInt(req.query.lowStockLimit, DEFAULT_LOW_STOCK_LIMIT),
+      MAX_LIMIT,
+    )
     const recentTransactionsLimit = Math.min(
       parsePositiveInt(req.query.recentTransactionsLimit, DEFAULT_RECENT_TRANSACTIONS_LIMIT),
       MAX_LIMIT,
     )
     const includeInactive = parseBoolean(req.query.includeInactive) === true
     const includeRelated = parseBoolean(req.query.includeRelated) !== false
-
     const ingredientMatch = includeInactive ? {} : { isActive: true }
     const recipeMatch = includeInactive ? {} : { isActive: true }
 
-    const [ingredientSummaryResult, recipeCount, lowStockItemsRaw, recentTransactionsRaw] = await Promise.all([
-      Ingredient.aggregate([
-        { $match: ingredientMatch },
-        {
-          $group: {
-            _id: null,
-            ingredientCount: { $sum: 1 },
-            totalStockValue: { $sum: { $multiply: ['$stockQuantity', '$costPerUnit'] } },
-            lowStockCount: {
-              $sum: {
-                $cond: [{ $and: [{ $gt: ['$reorderLevel', 0] }, { $lt: ['$stockQuantity', '$reorderLevel'] }] }, 1, 0],
-              },
-            },
-          },
-        },
-      ]),
+    const [ingredients, recipeCount, recentTransactionsRaw] = await Promise.all([
+      Ingredient.find(ingredientMatch)
+        .select('name unit stockQuantity costPerUnit reorderLevel isActive')
+        .lean(),
       Recipe.countDocuments(recipeMatch),
-      Ingredient.aggregate([
-        {
-          $match: {
-            ...ingredientMatch,
-            reorderLevel: { $gt: 0 },
-          },
-        },
-        {
-          $match: {
-            $expr: { $lt: ['$stockQuantity', '$reorderLevel'] },
-          },
-        },
-        {
-          $project: {
-            name: 1,
-            unit: 1,
-            stockQuantity: 1,
-            reorderLevel: 1,
-            isActive: 1,
-            stockValue: { $multiply: ['$stockQuantity', '$costPerUnit'] },
-            shortfall: { $subtract: ['$reorderLevel', '$stockQuantity'] },
-          },
-        },
-        { $sort: { shortfall: -1, stockQuantity: 1 } },
-        { $limit: lowStockLimit },
-      ]),
       InventoryTransaction.find().sort({ createdAt: -1 }).limit(recentTransactionsLimit).lean(),
     ])
 
-    const ingredientSummary = ingredientSummaryResult[0] || {
-      ingredientCount: 0,
-      totalStockValue: 0,
+    const statusCounts = {
+      outOfStockCount: 0,
+      criticalStockCount: 0,
       lowStockCount: 0,
+      unconfiguredReorderCount: 0,
+      sufficientStockCount: 0,
+      replenishmentRequiredCount: 0,
     }
+
+    const normalizedIngredients = ingredients.map((ingredient) => {
+      const stockStatus = calculateStockStatus(ingredient)
+
+      if (stockStatus.code === STOCK_STATUS.OUT_OF_STOCK) statusCounts.outOfStockCount += 1
+      if (stockStatus.code === STOCK_STATUS.CRITICAL) statusCounts.criticalStockCount += 1
+      if (stockStatus.code === STOCK_STATUS.LOW) statusCounts.lowStockCount += 1
+      if (stockStatus.code === STOCK_STATUS.UNCONFIGURED) statusCounts.unconfiguredReorderCount += 1
+      if (stockStatus.code === STOCK_STATUS.SUFFICIENT) statusCounts.sufficientStockCount += 1
+
+      if (
+        (stockStatus.code === STOCK_STATUS.OUT_OF_STOCK && ingredient.reorderLevel > 0) ||
+        stockStatus.code === STOCK_STATUS.CRITICAL ||
+        stockStatus.code === STOCK_STATUS.LOW
+      ) {
+        statusCounts.replenishmentRequiredCount += 1
+      }
+
+      return {
+        ...ingredient,
+        stockStatus,
+        stockValue: ingredient.stockQuantity * ingredient.costPerUnit,
+      }
+    })
+
+    const lowStockItems = normalizedIngredients
+      .filter(
+        (ingredient) =>
+          ingredient.reorderLevel > 0 &&
+          [STOCK_STATUS.OUT_OF_STOCK, STOCK_STATUS.CRITICAL, STOCK_STATUS.LOW].includes(
+            ingredient.stockStatus.code,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          right.stockStatus.shortfall - left.stockStatus.shortfall ||
+          left.stockQuantity - right.stockQuantity,
+      )
+      .slice(0, lowStockLimit)
+      .map((ingredient) => ({
+        id: ingredient._id,
+        name: ingredient.name,
+        unit: ingredient.unit,
+        stockQuantity: ingredient.stockQuantity,
+        reorderLevel: ingredient.reorderLevel,
+        shortfall: ingredient.stockStatus.shortfall,
+        stockValue: Number(ingredient.stockValue.toFixed(4)),
+        stockStatus: ingredient.stockStatus,
+        isActive: ingredient.isActive,
+      }))
 
     const recentTransactions = includeRelated
       ? await mapRecentTransactions(recentTransactionsRaw)
       : recentTransactionsRaw
+    const totalStockValue = normalizedIngredients.reduce(
+      (total, ingredient) => total + ingredient.stockValue,
+      0,
+    )
 
     return res.json({
       summary: {
-        ingredientCount: ingredientSummary.ingredientCount,
+        ingredientCount: ingredients.length,
         recipeCount,
-        lowStockCount: ingredientSummary.lowStockCount,
-        totalStockValue: Number((ingredientSummary.totalStockValue || 0).toFixed(4)),
+        totalStockValue: Number(totalStockValue.toFixed(4)),
+        ...statusCounts,
+        // Compatibility alias for the previous combined low-stock count.
+        legacyLowStockCount: statusCounts.replenishmentRequiredCount,
       },
-      lowStockItems: lowStockItemsRaw.map((item) => ({
-        id: item._id,
-        name: item.name,
-        unit: item.unit,
-        stockQuantity: item.stockQuantity,
-        reorderLevel: item.reorderLevel,
-        shortfall: item.shortfall,
-        stockValue: Number((item.stockValue || 0).toFixed(4)),
-        isActive: item.isActive,
-      })),
+      lowStockItems,
       recentTransactions,
       meta: {
         includeInactive,

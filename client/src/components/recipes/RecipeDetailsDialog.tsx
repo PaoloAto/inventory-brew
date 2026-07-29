@@ -17,6 +17,7 @@ import {
 import type { RecipeDetails } from '../../api/recipes'
 import { numericSx } from '../../theme'
 import { formatCurrency, formatPercentage, formatQuantity } from '../ui/formatters'
+import { StatusLabel } from '../ui/StatusLabel'
 
 interface RecipeDetailsDialogProps {
   open: boolean
@@ -31,9 +32,7 @@ export const RecipeDetailsDialog = ({
   loading,
   onClose,
 }: RecipeDetailsDialogProps) => {
-  const cost = details?.computed?.costPerServing ?? 0
-  const margin = details?.computed?.margin ?? 0
-  const marginPercent = details?.computed?.marginPercent ?? 0
+  const metrics = details?.configuration?.isValid === true ? details.computed : null
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -55,6 +54,21 @@ export const RecipeDetailsDialog = ({
               {details.recipe.description || 'No description recorded.'}
             </Typography>
 
+            {details.configuration?.isValid === false && (
+              <Stack spacing={0.75} alignItems="flex-start">
+                <StatusLabel label="Configuration issue" tone="warning" />
+                {details.configuration.issues.map((issue, index) => (
+                  <Typography
+                    key={`${issue.code}-${issue.ingredientId}-${index}`}
+                    variant="caption"
+                    color="text.secondary"
+                  >
+                    {issue.message}
+                  </Typography>
+                ))}
+              </Stack>
+            )}
+
             <Box
               sx={{
                 display: 'grid',
@@ -65,9 +79,14 @@ export const RecipeDetailsDialog = ({
             >
               {[
                 ['Selling price', formatCurrency(details.recipe.sellingPrice)],
-                ['Ingredient cost', formatCurrency(cost)],
-                ['Gross margin', formatCurrency(margin)],
-                ['Margin', formatPercentage(marginPercent)],
+                ['Ingredient cost', metrics ? formatCurrency(metrics.ingredientCost) : '—'],
+                ['Gross margin', metrics ? formatCurrency(metrics.grossMargin) : '—'],
+                [
+                  'Margin',
+                  metrics?.marginPercent === null || metrics?.marginPercent === undefined
+                    ? '—'
+                    : formatPercentage(metrics.marginPercent),
+                ],
               ].map(([label, value], index) => (
                 <Box
                   key={label}
@@ -114,10 +133,10 @@ export const RecipeDetailsDialog = ({
                           {formatQuantity(line.quantity, line.unit)}
                         </TableCell>
                         <TableCell align="right" sx={numericSx}>
-                          {formatCurrency(line.costPerUnit)}
+                          {line.costPerUnit === null ? '—' : formatCurrency(line.costPerUnit)}
                         </TableCell>
                         <TableCell align="right" sx={numericSx}>
-                          {formatCurrency(line.costContribution)}
+                          {line.costContribution === null ? '—' : formatCurrency(line.costContribution)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -126,7 +145,7 @@ export const RecipeDetailsDialog = ({
                         Total ingredient cost
                       </TableCell>
                       <TableCell align="right" sx={{ ...numericSx, fontWeight: 500 }}>
-                        {formatCurrency(cost)}
+                        {metrics ? formatCurrency(metrics.ingredientCost) : '—'}
                       </TableCell>
                     </TableRow>
                   </TableBody>

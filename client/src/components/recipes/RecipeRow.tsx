@@ -1,8 +1,9 @@
-import { TableCell, TableRow, Typography } from '@mui/material'
+import { Stack, TableCell, TableRow, Typography } from '@mui/material'
 import RestaurantIcon from '@mui/icons-material/Restaurant'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import EditIcon from '@mui/icons-material/Edit'
 import { RowActionMenu } from '../ui/RowActionMenu'
+import { StatusLabel } from '../ui/StatusLabel'
 import type { Recipe } from '../../types/recipe'
 import type { RecipeColumnKey } from './RecipeTable'
 import { formatCurrency, formatPercentage } from '../ui/formatters'
@@ -11,7 +12,6 @@ import { numericSx } from '../../theme'
 interface RecipeRowProps {
   recipe: Recipe
   visibleColumns: RecipeColumnKey[]
-  computeCostPerServing: (ingredients: Recipe['ingredients']) => number
   onCook: () => void
   onView: () => void
   onEdit: () => void
@@ -20,22 +20,35 @@ interface RecipeRowProps {
 export const RecipeRow = ({
   recipe,
   visibleColumns,
-  computeCostPerServing,
   onCook,
   onView,
   onEdit,
 }: RecipeRowProps) => {
-  const cost = computeCostPerServing(recipe.ingredients)
-  const margin = recipe.sellingPrice - cost
-  const marginPercent = recipe.sellingPrice ? (margin / recipe.sellingPrice) * 100 : 0
-
+  const isConfigurationValid = recipe.configuration?.isValid === true
+  const metrics = isConfigurationValid ? recipe.computed : null
+  const marginPercent = metrics?.marginPercent
   const isVisible = (column: RecipeColumnKey) => visibleColumns.includes(column)
   const marginColor =
-    marginPercent < 20 ? 'error.main' : marginPercent < 40 ? 'warning.main' : 'text.primary'
+    marginPercent === null || marginPercent === undefined
+      ? 'text.primary'
+      : marginPercent < 20
+        ? 'error.main'
+        : marginPercent < 40
+          ? 'warning.main'
+          : 'text.primary'
 
   return (
     <TableRow hover>
-      {isVisible('name') && <TableCell sx={{ fontWeight: 500 }}>{recipe.name}</TableCell>}
+      {isVisible('name') && (
+        <TableCell>
+          <Stack spacing={0.6} alignItems="flex-start">
+            <Typography component="span" sx={{ fontWeight: 500 }}>
+              {recipe.name}
+            </Typography>
+            {!isConfigurationValid && <StatusLabel label="Configuration issue" tone="warning" />}
+          </Stack>
+        </TableCell>
+      )}
       {isVisible('description') && (
         <TableCell sx={{ maxWidth: 260 }} title={recipe.description}>
           {recipe.description}
@@ -46,19 +59,23 @@ export const RecipeRow = ({
         <TableCell align="right" sx={numericSx}>{formatCurrency(recipe.sellingPrice)}</TableCell>
       )}
       {isVisible('costPerServing') && (
-        <TableCell align="right" sx={numericSx}>{formatCurrency(cost)}</TableCell>
+        <TableCell align="right" sx={numericSx}>
+          {metrics ? formatCurrency(metrics.ingredientCost) : '—'}
+        </TableCell>
       )}
 
       {isVisible('margin') && (
         <TableCell align="right" sx={{ ...numericSx, color: marginColor, fontWeight: 500 }}>
-          {formatCurrency(margin)}
+          {metrics ? formatCurrency(metrics.grossMargin) : '—'}
         </TableCell>
       )}
 
       {isVisible('marginPercent') && (
         <TableCell align="right">
           <Typography component="span" sx={{ ...numericSx, color: marginColor, fontSize: '0.8125rem' }}>
-            {formatPercentage(marginPercent)}
+            {marginPercent === null || marginPercent === undefined
+              ? '—'
+              : formatPercentage(marginPercent)}
           </Typography>
         </TableCell>
       )}
@@ -91,6 +108,7 @@ export const RecipeRow = ({
                 label: 'Cook recipe',
                 icon: <RestaurantIcon fontSize="small" />,
                 onClick: onCook,
+                disabled: !isConfigurationValid,
               },
             ]}
           />

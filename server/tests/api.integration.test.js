@@ -5,6 +5,7 @@ const app = require('../app')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const { calculateStockStatus } = require('../domain/stockStatus')
 
 jest.setTimeout(120000)
 
@@ -129,6 +130,193 @@ describe('Inventory Brew API integration', () => {
     expect(restoreResponse.body.ingredient.isActive).toBe(true)
   })
 
+  test('recipe list and details return identical backend-computed metrics', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Coffee',
+      unit: 'g',
+      stockQuantity: 100,
+      costPerUnit: 0.375,
+      reorderLevel: 20,
+    })
+    const recipe = await Recipe.create({
+      name: 'Double coffee',
+      sellingPrice: 5,
+      ingredients: [{ ingredientId: ingredient._id, quantity: 8, unit: 'g' }],
+    })
+
+    const listResponse = await request(app).get('/api/recipes').query({ includeComputed: true })
+    const detailsResponse = await request(app)
+      .get(`/api/recipes/${recipe._id}`)
+      .query({ includeComputed: true })
+
+    expect(listResponse.status).toBe(200)
+    expect(detailsResponse.status).toBe(200)
+    expect(listResponse.body.items[0].computed).toEqual({
+      ingredientCost: 3,
+      costPerServing: 3,
+      grossMargin: 2,
+      margin: 2,
+      marginPercent: 40,
+    })
+    expect(detailsResponse.body.computed).toEqual(listResponse.body.items[0].computed)
+    expect(detailsResponse.body.configuration).toEqual(listResponse.body.items[0].configuration)
+    expect(detailsResponse.body.configuration.isValid).toBe(true)
+  })
+
+  test('recipe metrics return null marginPercent when sellingPrice is zero', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Water',
+      unit: 'ml',
+      stockQuantity: 1000,
+      costPerUnit: 0.001,
+    })
+    const recipe = await Recipe.create({
+      name: 'Water serving',
+      sellingPrice: 0,
+      ingredients: [{ ingredientId: ingredient._id, quantity: 250, unit: 'ml' }],
+    })
+
+    const response = await request(app)
+      .get(`/api/recipes/${recipe._id}`)
+      .query({ includeComputed: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body.computed.marginPercent).toBeNull()
+    expect(response.body.configuration.isValid).toBe(true)
+  })
+
+  test('missing recipe ingredients invalidate configuration instead of contributing zero cost', async () => {
+    const missingIngredientId = new mongoose.Types.ObjectId()
+    const recipe = await Recipe.create({
+      name: 'Broken recipe',
+      sellingPrice: 12,
+      ingredients: [{ ingredientId: missingIngredientId, quantity: 2, unit: 'pcs' }],
+    })
+
+    const response = await request(app)
+      .get(`/api/recipes/${recipe._id}`)
+      .query({ includeComputed: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body.computed).toBeNull()
+    expect(response.body.configuration.isValid).toBe(false)
+    expect(response.body.configuration.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'MISSING_INGREDIENT',
+          ingredientId: String(missingIngredientId),
+        }),
+      ]),
+    )
+  })
+
+  test('inactive recipe ingredients invalidate configuration', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Archived spice',
+      unit: 'g',
+      stockQuantity: 5,
+      costPerUnit: 2,
+      isActive: false,
+    })
+    const recipe = await Recipe.create({
+      name: 'Archived spice recipe',
+      sellingPrice: 10,
+      ingredients: [{ ingredientId: ingredient._id, quantity: 1, unit: 'g' }],
+    })
+
+    const response = await request(app).get('/api/recipes').query({ includeComputed: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body.items[0].computed).toBeNull()
+    expect(response.body.items[0].configuration.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'INACTIVE_INGREDIENT' })]),
+    )
+  })
+
+  test('calculateStockStatus handles exact business-rule boundaries', () => {
+    expect(calculateStockStatus({ stockQuantity: 0, reorderLevel: 0 }).code).toBe('OUT_OF_STOCK')
+    expect(calculateStockStatus({ stockQuantity: 5, reorderLevel: 0 }).code).toBe('UNCONFIGURED')
+    expect(calculateStockStatus({ stockQuantity: 2.5, reorderLevel: 10 }).code).toBe('CRITICAL')
+    expect(calculateStockStatus({ stockQuantity: 10, reorderLevel: 10 }).code).toBe('LOW')
+    expect(calculateStockStatus({ stockQuantity: 10.01, reorderLevel: 10 }).code).toBe('SUFFICIENT')
+  })
+
+  test('ingredient metadata returns the complete active category catalog', async () => {
+    await Ingredient.insertMany([
+      { name: 'Milk', category: ' Dairy ', unit: 'ml', stockQuantity: 1, costPerUnit: 1 },
+      { name: 'Cheddar', category: 'Dairy', unit: 'g', stockQuantity: 1, costPerUnit: 1 },
+      { name: 'Apple', category: 'Produce', unit: 'pcs', stockQuantity: 1, costPerUnit: 1 },
+      { name: 'Blank', category: '  ', unit: 'pcs', stockQuantity: 1, costPerUnit: 1 },
+      {
+        name: 'Archived meat',
+        category: 'Meat',
+        unit: 'g',
+        stockQuantity: 1,
+        costPerUnit: 1,
+        isActive: false,
+      },
+    ])
+
+    const response = await request(app).get('/api/ingredients/meta')
+
+    expect(response.status).toBe(200)
+    expect(response.body.categories).toEqual([
+      { name: 'Dairy', activeCount: 2 },
+      { name: 'Produce', activeCount: 1 },
+    ])
+    expect(response.body.units).toEqual(['pcs', 'g', 'kg', 'ml', 'l'])
+  })
+
+  test('healthyStockOnly excludes ingredients without a configured reorder point', async () => {
+    await Ingredient.insertMany([
+      {
+        name: 'Unconfigured',
+        unit: 'pcs',
+        stockQuantity: 50,
+        costPerUnit: 1,
+        reorderLevel: 0,
+      },
+      {
+        name: 'Sufficient',
+        unit: 'pcs',
+        stockQuantity: 11,
+        costPerUnit: 1,
+        reorderLevel: 10,
+      },
+      { name: 'At reorder', unit: 'pcs', stockQuantity: 10, costPerUnit: 1, reorderLevel: 10 },
+    ])
+
+    const response = await request(app).get('/api/ingredients').query({ healthyStockOnly: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body.items.map((item) => item.name)).toEqual(['Sufficient'])
+    expect(response.body.items[0].stockStatus.code).toBe('SUFFICIENT')
+  })
+
+  test('dateTo date-only filters include transactions through the end of that date', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Timed ingredient',
+      unit: 'pcs',
+      stockQuantity: 1,
+      costPerUnit: 1,
+    })
+    await InventoryTransaction.create({
+      ingredientId: ingredient._id,
+      type: 'IN',
+      quantity: 1,
+      previousStock: 0,
+      newStock: 1,
+      reason: 'Late movement',
+      createdAt: new Date('2026-07-15T23:45:00.000Z'),
+    })
+
+    const response = await request(app).get('/api/transactions').query({ dateTo: '2026-07-15' })
+
+    expect(response.status).toBe(200)
+    expect(response.body.items).toHaveLength(1)
+    expect(response.body.items[0].reason).toBe('Late movement')
+  })
+
   test('POST /api/recipes/:id/cook deducts stock and creates OUT transactions', async () => {
     const carrotResponse = await request(app).post('/api/ingredients').send({
       name: 'Carrot',
@@ -226,6 +414,14 @@ describe('Inventory Brew API integration', () => {
     expect(response.body.summary).toHaveProperty('ingredientCount')
     expect(response.body.summary).toHaveProperty('recipeCount')
     expect(response.body.summary).toHaveProperty('lowStockCount')
+    expect(response.body.summary).toMatchObject({
+      outOfStockCount: 0,
+      criticalStockCount: 0,
+      lowStockCount: 0,
+      unconfiguredReorderCount: 0,
+      sufficientStockCount: 1,
+      replenishmentRequiredCount: 0,
+    })
     expect(response.body.summary).toHaveProperty('totalStockValue')
     expect(Array.isArray(response.body.lowStockItems)).toBe(true)
     expect(Array.isArray(response.body.recentTransactions)).toBe(true)

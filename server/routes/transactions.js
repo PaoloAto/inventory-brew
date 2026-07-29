@@ -35,10 +35,19 @@ const parseBoolean = (value) => {
   return undefined
 }
 
-const parseDate = (value) => {
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+const parseDate = (value, boundary) => {
   if (!value) return undefined
-  const date = new Date(value)
+  const normalizedValue = String(value).trim()
+  const isDateOnly = DATE_ONLY_PATTERN.test(normalizedValue)
+  const date = new Date(
+    isDateOnly
+      ? `${normalizedValue}T${boundary === 'end' ? '23:59:59.999' : '00:00:00.000'}Z`
+      : normalizedValue,
+  )
   if (Number.isNaN(date.getTime())) return undefined
+  if (isDateOnly && date.toISOString().slice(0, 10) !== normalizedValue) return undefined
   return date
 }
 
@@ -153,7 +162,7 @@ router.get('/', async (req, res) => {
 
     const createdAt = {}
     if (req.query.dateFrom) {
-      const dateFrom = parseDate(req.query.dateFrom)
+      const dateFrom = parseDate(req.query.dateFrom, 'start')
       if (!dateFrom) {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid transaction query', [
           'dateFrom must be a valid date (ISO format recommended)',
@@ -163,7 +172,7 @@ router.get('/', async (req, res) => {
     }
 
     if (req.query.dateTo) {
-      const dateTo = parseDate(req.query.dateTo)
+      const dateTo = parseDate(req.query.dateTo, 'end')
       if (!dateTo) {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid transaction query', [
           'dateTo must be a valid date (ISO format recommended)',

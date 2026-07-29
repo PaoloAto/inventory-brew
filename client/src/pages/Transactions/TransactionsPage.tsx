@@ -54,6 +54,16 @@ const defaultFilters: TransactionFilters = {
   dateTo: '',
 }
 
+const toLocalDayBoundaryIso = (dateValue: string, boundary: 'start' | 'end') => {
+  if (!dateValue) return undefined
+  const [year, month, day] = dateValue.split('-').map(Number)
+  const date =
+    boundary === 'start'
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999)
+  return date.toISOString()
+}
+
 export const TransactionsPage = () => {
   const { showSnackbar } = useAppSnackbar()
   const [rows, setRows] = useState<InventoryTransaction[]>([])
@@ -82,8 +92,8 @@ export const TransactionsPage = () => {
         limit: rowsPerPage,
         type: filters.type === 'all' ? undefined : filters.type,
         reason: filters.reason || undefined,
-        dateFrom: filters.dateFrom || undefined,
-        dateTo: filters.dateTo || undefined,
+        dateFrom: toLocalDayBoundaryIso(filters.dateFrom, 'start'),
+        dateTo: toLocalDayBoundaryIso(filters.dateTo, 'end'),
         includeRelated: true,
         sortBy: 'createdAt',
         sortOrder,

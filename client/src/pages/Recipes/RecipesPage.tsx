@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import {
   Box,
@@ -44,7 +44,7 @@ import { useAppSnackbar } from '../../context/snackbarContext'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import { numericSx } from '../../theme'
 import type { Ingredient } from '../../types/ingredient'
-import type { Recipe, RecipeIngredient } from '../../types/recipe'
+import type { Recipe } from '../../types/recipe'
 
 const recipeColumnOptions: Array<TableColumnOption<RecipeColumnKey>> = [
   { key: 'name', label: 'Recipe', locked: true },
@@ -99,30 +99,26 @@ export const RecipesPage = () => {
   const [rowsPerPage, setRowsPerPage] = useState(parsePositiveInt(searchParams.get('rows'), 10))
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 350)
 
-  const ingredientCostMap = useMemo(
-    () => Object.fromEntries(availableIngredients.map((ingredient) => [ingredient.id, ingredient.costPerUnit])),
-    [availableIngredients],
-  )
-
-  const computeCostPerServing = useCallback(
-    (ingredients: RecipeIngredient[]) =>
-      ingredients.reduce((sum, recipeIngredient) => {
-        const costPerUnit = ingredientCostMap[recipeIngredient.ingredientId] ?? 0
-        return sum + costPerUnit * recipeIngredient.quantity
-      }, 0),
-    [ingredientCostMap],
-  )
-
   const loadAvailableIngredients = useCallback(async () => {
     try {
-      const response = await listIngredients({
-        page: 1,
-        limit: 500,
-        includeInactive: false,
-        sortBy: 'name',
-        sortOrder: 'asc',
-      })
-      setAvailableIngredients(response.items)
+      const catalog: Ingredient[] = []
+      let catalogPage = 1
+      let totalPages = 1
+
+      do {
+        const response = await listIngredients({
+          page: catalogPage,
+          limit: 100,
+          includeInactive: false,
+          sortBy: 'name',
+          sortOrder: 'asc',
+        })
+        catalog.push(...response.items)
+        totalPages = response.pagination.totalPages
+        catalogPage += 1
+      } while (catalogPage <= totalPages)
+
+      setAvailableIngredients(catalog)
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to load ingredient catalog'), { severity: 'error' })
     }
@@ -135,6 +131,7 @@ export const RecipesPage = () => {
         page: page + 1,
         limit: rowsPerPage,
         includeInactive: false,
+        includeComputed: true,
         search: debouncedSearch || undefined,
         sortBy: recipeSortFieldMap[sortBy],
         sortOrder,
@@ -309,7 +306,6 @@ export const RecipesPage = () => {
             recipes={recipes}
             visibleColumns={visibleColumns}
             tableSize={density === 'compact' ? 'small' : 'medium'}
-            computeCostPerServing={computeCostPerServing}
             onCook={(recipe) => {
               setRecipeToCook(recipe)
               setCookServings(1)

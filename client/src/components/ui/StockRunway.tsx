@@ -1,46 +1,52 @@
 import { Box, Stack, Typography } from '@mui/material'
 import { ledgerTokens, numericSx } from '../../theme'
+import type { StockStatus } from '../../types/ingredient'
 import { formatPercentage, formatQuantity } from './formatters'
 
 interface StockRunwayProps {
   current: number
-  reorderLevel?: number
+  stockStatus: StockStatus
   unit: string
   compact?: boolean
 }
 
 export const StockRunway = ({
   current,
-  reorderLevel = 0,
+  stockStatus,
   unit,
   compact = false,
 }: StockRunwayProps) => {
-  if (reorderLevel <= 0) {
+  if (stockStatus.code === 'UNCONFIGURED') {
     return (
       <Stack spacing={0.55} sx={{ minWidth: compact ? 150 : 190 }}>
         <Box sx={{ height: 8, bgcolor: ledgerTokens.surfaceSecondary, border: '1px solid', borderColor: 'divider' }} />
         <Typography variant="caption" color="text.secondary">
-          Reorder level not set
+          Reorder point not set
         </Typography>
       </Stack>
     )
   }
 
-  const ratio = current / reorderLevel
-  const percent = Math.max(0, Math.round(ratio * 100))
+  const percent = Math.max(0, Math.round((stockStatus.stockRatio ?? 0) * 100))
   const progress = Math.min(100, percent)
-  const shortfall = Math.max(0, reorderLevel - current)
-  const tone = ratio <= 0.25 ? 'critical' : ratio < 1 ? 'low' : 'normal'
   const fillColor =
-    tone === 'critical'
+    stockStatus.code === 'OUT_OF_STOCK' || stockStatus.code === 'CRITICAL'
       ? ledgerTokens.danger
-      : tone === 'low'
+      : stockStatus.code === 'LOW'
         ? ledgerTokens.warning
         : ledgerTokens.success
+  const shortfallCopy =
+    stockStatus.shortfall === null
+      ? ''
+      : ` · Needs ${formatQuantity(stockStatus.shortfall, unit)} to reorder point`
   const label =
-    tone === 'normal'
-      ? `${formatPercentage(percent)} of target`
-      : `${tone === 'critical' ? 'Critical · ' : ''}Needs ${formatQuantity(shortfall, unit)}`
+    stockStatus.code === 'OUT_OF_STOCK'
+      ? `Out of stock${shortfallCopy}`
+      : stockStatus.code === 'CRITICAL'
+        ? `Critical${shortfallCopy}`
+        : stockStatus.code === 'LOW'
+          ? `Low stock${shortfallCopy}`
+          : `${formatPercentage(percent)} of reorder point`
 
   return (
     <Stack spacing={0.55} sx={{ minWidth: compact ? 150 : 190 }}>
@@ -72,9 +78,9 @@ export const StockRunway = ({
         sx={{
           ...numericSx,
           color:
-            tone === 'critical'
+            stockStatus.code === 'OUT_OF_STOCK' || stockStatus.code === 'CRITICAL'
               ? 'error.main'
-              : tone === 'low'
+              : stockStatus.code === 'LOW'
                 ? 'warning.main'
                 : 'text.secondary',
         }}

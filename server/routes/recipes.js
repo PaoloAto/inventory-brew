@@ -3,6 +3,7 @@ const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const { calculateRecipeMetrics } = require('../services/recipeMetricsService')
 
 const router = express.Router()
 
@@ -234,24 +235,6 @@ const validateIngredientReferences = async (ingredientLines) => {
   })
 
   return { details, ingredientMap }
-}
-
-const computeRecipeMetrics = (recipeDoc, ingredientMap) => {
-  const ingredients = recipeDoc.ingredients || []
-  const recipeCost = ingredients.reduce((sum, line) => {
-    const ingredient = ingredientMap.get(String(line.ingredientId))
-    const costPerUnit = ingredient ? ingredient.costPerUnit : 0
-    return sum + line.quantity * costPerUnit
-  }, 0)
-
-  const margin = recipeDoc.sellingPrice - recipeCost
-  const marginPercent = recipeDoc.sellingPrice > 0 ? (margin / recipeDoc.sellingPrice) * 100 : 0
-
-  return {
-    costPerServing: Number(recipeCost.toFixed(4)),
-    margin: Number(margin.toFixed(4)),
-    marginPercent: Number(marginPercent.toFixed(2)),
-  }
 }
 
 const buildCookPlan = ({ recipe, ingredients, servings }) => {
@@ -574,14 +557,15 @@ router.get('/', async (req, res) => {
 
     if (includeComputed && items.length > 0) {
       const ingredientIds = [...new Set(items.flatMap((recipe) => recipe.ingredients.map((line) => String(line.ingredientId))))]
-      const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select('costPerUnit')
+      const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
+        'name unit isActive costPerUnit',
+      )
       const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
 
       normalizedItems = items.map((recipe) => {
-        const recipeObject = recipe
         return {
-          ...recipeObject,
-          computed: computeRecipeMetrics(recipeObject, ingredientMap),
+          ...recipe,
+          ...calculateRecipeMetrics(recipe, ingredientMap),
         }
       })
     }
@@ -693,7 +677,7 @@ router.get('/:id', async (req, res) => {
 
     const ingredientDetails = recipe.ingredients.map((line) => {
       const ingredient = ingredientMap.get(String(line.ingredientId))
-      const costPerUnit = ingredient ? ingredient.costPerUnit : 0
+      const costPerUnit = ingredient ? ingredient.costPerUnit : null
       return {
         ingredientId: line.ingredientId,
         ingredientName: ingredient ? ingredient.name : '(Missing ingredient)',
@@ -702,17 +686,20 @@ router.get('/:id', async (req, res) => {
         quantity: line.quantity,
         unit: line.unit,
         costPerUnit,
-        costContribution: Number((line.quantity * costPerUnit).toFixed(4)),
+        costContribution: ingredient ? Number((line.quantity * ingredient.costPerUnit).toFixed(4)) : null,
       }
     })
 
     const recipeObject = recipe
     const shouldIncludeComputed = includeComputed !== false
+    const metrics = shouldIncludeComputed
+      ? calculateRecipeMetrics(recipeObject, ingredientMap)
+      : { computed: undefined, configuration: undefined }
 
     return res.json({
       recipe: recipeObject,
       ingredientDetails,
-      computed: shouldIncludeComputed ? computeRecipeMetrics(recipeObject, ingredientMap) : undefined,
+      ...metrics,
     })
   } catch (err) {
     console.error('Error fetching recipe:', err)

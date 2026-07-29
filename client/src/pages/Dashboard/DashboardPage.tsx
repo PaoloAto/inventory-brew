@@ -69,6 +69,12 @@ export const DashboardPage = () => {
     ingredientCount: 0,
     recipeCount: 0,
     lowStockCount: 0,
+    outOfStockCount: 0,
+    criticalStockCount: 0,
+    unconfiguredReorderCount: 0,
+    sufficientStockCount: 0,
+    replenishmentRequiredCount: 0,
+    legacyLowStockCount: 0,
     totalStockValue: 0,
   }
   const lowStockItems = data?.lowStockItems ?? []
@@ -97,9 +103,9 @@ export const DashboardPage = () => {
         <AttentionRail
           facts={[
             {
-              value: summary.lowStockCount,
-              label: `low-stock item${summary.lowStockCount === 1 ? '' : 's'}`,
-              tone: summary.lowStockCount > 0 ? 'warning' : 'neutral',
+              value: summary.replenishmentRequiredCount,
+              label: `replenishment item${summary.replenishmentRequiredCount === 1 ? '' : 's'}`,
+              tone: summary.replenishmentRequiredCount > 0 ? 'warning' : 'neutral',
             },
             {
               value: summary.recipeCount,
@@ -114,8 +120,11 @@ export const DashboardPage = () => {
             { label: 'Ingredients', value: String(summary.ingredientCount) },
             {
               label: 'Low stock',
-              value: String(summary.lowStockCount),
-              detail: summary.lowStockCount > 0 ? 'Replenishment required' : 'No current alerts',
+              value: String(summary.replenishmentRequiredCount),
+              detail:
+                summary.replenishmentRequiredCount > 0
+                  ? 'Replenishment required'
+                  : 'No current alerts',
             },
             { label: 'Active recipes', value: String(summary.recipeCount) },
           ]}
@@ -133,7 +142,7 @@ export const DashboardPage = () => {
       >
         <LedgerSection
           title="Low-stock queue"
-          subtitle="Stock on hand relative to each reorder target."
+          subtitle="Stock on hand relative to each reorder point."
           padded={false}
         >
           {lowStockItems.length === 0 ? (
@@ -167,7 +176,7 @@ export const DashboardPage = () => {
                   </Box>
                   <StockRunway
                     current={item.stockQuantity}
-                    reorderLevel={item.reorderLevel}
+                    stockStatus={item.stockStatus}
                     unit={item.unit}
                   />
                 </Box>

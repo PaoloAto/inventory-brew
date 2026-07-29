@@ -11,7 +11,10 @@ import {
 } from '@mui/material'
 import type { Ingredient, Unit } from '../../types/ingredient'
 
-export type IngredientInput = Omit<Ingredient, 'id' | 'isActive'> & { id?: string; isActive?: boolean }
+export type IngredientInput = Omit<Ingredient, 'id' | 'isActive' | 'stockStatus'> & {
+  id?: string
+  isActive?: boolean
+}
 
 interface IngredientDialogProps {
   open: boolean
@@ -64,7 +67,7 @@ export const IngredientDialog = ({
     const nextErrors: Record<string, string> = {}
     if (!values.name.trim()) nextErrors.name = 'Name is required'
     if (!values.unit) nextErrors.unit = 'Unit is required'
-    if (values.stockQuantity < 0) nextErrors.stockQuantity = 'Must be non-negative'
+    if (!initialData && values.stockQuantity < 0) nextErrors.stockQuantity = 'Must be non-negative'
     if (values.costPerUnit < 0) nextErrors.costPerUnit = 'Must be non-negative'
     if (values.reorderLevel !== undefined && values.reorderLevel < 0) {
       nextErrors.reorderLevel = 'Must be non-negative'
@@ -102,21 +105,31 @@ export const IngredientDialog = ({
             />
           </Grid>
           <Grid size={{ xs: 12, sm: 4 }}>
-            <TextField
-              select
-              label="Unit"
-              value={values.unit}
-              onChange={(e) => handleChange('unit', e.target.value as Unit)}
-              fullWidth
-              error={Boolean(errors.unit)}
-              helperText={errors.unit}
-            >
-              {UNITS.map((unit) => (
-                <MenuItem key={unit} value={unit}>
-                  {unit}
-                </MenuItem>
-              ))}
-            </TextField>
+            {initialData ? (
+              <TextField
+                label="Unit"
+                value={values.unit}
+                fullWidth
+                slotProps={{ input: { readOnly: true } }}
+                helperText="Unit cannot be changed after creation."
+              />
+            ) : (
+              <TextField
+                select
+                label="Unit"
+                value={values.unit}
+                onChange={(e) => handleChange('unit', e.target.value as Unit)}
+                fullWidth
+                error={Boolean(errors.unit)}
+                helperText={errors.unit}
+              >
+                {UNITS.map((unit) => (
+                  <MenuItem key={unit} value={unit}>
+                    {unit}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
           </Grid>
 
           <Grid size={{ xs: 12, sm: 6 }}>
@@ -137,16 +150,26 @@ export const IngredientDialog = ({
           </Grid>
 
           <Grid size={{ xs: 12, sm: 4 }}>
-            <TextField
-              type="number"
-              label="Stock quantity"
-              value={values.stockQuantity}
-              onChange={(e) => handleChange('stockQuantity', Number(e.target.value))}
-              fullWidth
-              error={Boolean(errors.stockQuantity)}
-              helperText={errors.stockQuantity}
-              inputProps={{ min: 0 }}
-            />
+            {initialData ? (
+              <TextField
+                label="Current stock"
+                value={`${values.stockQuantity} ${values.unit}`}
+                fullWidth
+                slotProps={{ input: { readOnly: true } }}
+                helperText="Use Adjust stock to record inventory changes."
+              />
+            ) : (
+              <TextField
+                type="number"
+                label="Initial stock"
+                value={values.stockQuantity}
+                onChange={(e) => handleChange('stockQuantity', Number(e.target.value))}
+                fullWidth
+                error={Boolean(errors.stockQuantity)}
+                helperText={errors.stockQuantity}
+                inputProps={{ min: 0 }}
+              />
+            )}
           </Grid>
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField

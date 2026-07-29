@@ -2,6 +2,7 @@ const express = require('express')
 const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
+const { calculateStockStatus } = require('../domain/stockStatus')
 
 const router = express.Router()
 
@@ -22,6 +23,14 @@ const CREATE_ALLOWED_FIELDS = new Set([
 ])
 const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'isActive'])
 const ADJUST_ALLOWED_FIELDS = new Set(['type', 'quantity', 'newStockQuantity', 'reason', 'unitCost'])
+
+const normalizeIngredient = (ingredient) => {
+  const normalized = typeof ingredient.toObject === 'function' ? ingredient.toObject() : ingredient
+  return {
+    ...normalized,
+    stockStatus: calculateStockStatus(normalized),
+  }
+}
 
 const sendError = (res, status, code, message, details) => {
   const error = { code, message }
@@ -280,13 +289,12 @@ router.get('/', async (req, res) => {
 
     if (lowStockOnly) {
       filterClauses.push({ reorderLevel: { $gt: 0 } })
-      filterClauses.push({ $expr: { $lt: ['$stockQuantity', '$reorderLevel'] } })
+      filterClauses.push({ $expr: { $lte: ['$stockQuantity', '$reorderLevel'] } })
     }
 
     if (healthyStockOnly) {
-      filterClauses.push({
-        $or: [{ reorderLevel: { $lte: 0 } }, { $expr: { $gte: ['$stockQuantity', '$reorderLevel'] } }],
-      })
+      filterClauses.push({ reorderLevel: { $gt: 0 } })
+      filterClauses.push({ $expr: { $gt: ['$stockQuantity', '$reorderLevel'] } })
     }
 
     const filters = filterClauses.length > 0 ? { $and: filterClauses } : {}
@@ -299,7 +307,7 @@ router.get('/', async (req, res) => {
     ])
 
     res.json({
-      items,
+      items: items.map(normalizeIngredient),
       pagination: {
         page,
         limit,
@@ -310,6 +318,28 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Error fetching ingredients:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to fetch ingredients')
+  }
+})
+
+// GET /api/ingredients/meta - complete active category and unit metadata
+router.get('/meta', async (_req, res) => {
+  try {
+    const categories = await Ingredient.aggregate([
+      { $match: { isActive: true } },
+      { $project: { category: { $trim: { input: { $ifNull: ['$category', ''] } } } } },
+      { $match: { category: { $ne: '' } } },
+      { $group: { _id: '$category', activeCount: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+      { $project: { _id: 0, name: '$_id', activeCount: 1 } },
+    ])
+
+    return res.json({
+      categories,
+      units: ALLOWED_UNITS,
+    })
+  } catch (err) {
+    console.error('Error fetching ingredient metadata:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to fetch ingredient metadata')
   }
 })
 
@@ -364,7 +394,7 @@ router.post('/:id/adjust-stock', async (req, res) => {
 
     res.json({
       message: 'Stock adjusted successfully',
-      ingredient,
+      ingredient: normalizeIngredient(ingredient),
       transaction,
     })
   } catch (err) {
@@ -417,13 +447,13 @@ router.patch('/:id/restore', async (req, res) => {
     }
 
     if (ingredient.isActive) {
-      return res.json({ message: 'Ingredient is already active', ingredient })
+      return res.json({ message: 'Ingredient is already active', ingredient: normalizeIngredient(ingredient) })
     }
 
     ingredient.isActive = true
     await ingredient.save()
 
-    return res.json({ message: 'Ingredient restored', ingredient })
+    return res.json({ message: 'Ingredient restored', ingredient: normalizeIngredient(ingredient) })
   } catch (err) {
     console.error('Error restoring ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to restore ingredient')
@@ -446,7 +476,7 @@ router.get('/:id', async (req, res) => {
       return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
     }
 
-    res.json(ingredient)
+    res.json(normalizeIngredient(ingredient))
   } catch (err) {
     console.error('Error fetching ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to fetch ingredient')
@@ -476,7 +506,7 @@ router.post('/', async (req, res) => {
       })
     }
 
-    res.status(201).json(saved)
+    res.status(201).json(normalizeIngredient(saved))
   } catch (err) {
     console.error('Error creating ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to create ingredient')
@@ -512,7 +542,7 @@ router.put('/:id', async (req, res) => {
       return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
     }
 
-    res.json(updated)
+    res.json(normalizeIngredient(updated))
   } catch (err) {
     console.error('Error updating ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to update ingredient')
@@ -530,13 +560,13 @@ router.delete('/:id', async (req, res) => {
     }
 
     if (!ingredient.isActive) {
-      return res.json({ message: 'Ingredient already inactive', ingredient })
+      return res.json({ message: 'Ingredient already inactive', ingredient: normalizeIngredient(ingredient) })
     }
 
     ingredient.isActive = false
     await ingredient.save()
 
-    res.json({ message: 'Ingredient archived', ingredient })
+    res.json({ message: 'Ingredient archived', ingredient: normalizeIngredient(ingredient) })
   } catch (err) {
     console.error('Error archiving ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to archive ingredient')
