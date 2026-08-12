@@ -283,9 +283,7 @@ export const RecipesPage = () => {
       setRecipeToCook(null)
       setCookPreview(null)
       setCookIdempotencyKey(null)
-      if (!response.replayed) {
-        await Promise.all([loadRecipes(), loadAvailableIngredients()])
-      }
+      await Promise.all([loadRecipes(), loadAvailableIngredients()])
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to cook recipe'), { severity: 'error' })
     } finally {

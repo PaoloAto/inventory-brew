@@ -601,14 +601,18 @@ describe('Inventory Brew API integration', () => {
     expect((await Recipe.findById(recipe._id)).isActive).toBe(false)
   })
 
-  test('readiness reports canonical migration presence gaps', async () => {
+  test('readiness reports canonical migration presence gaps including explicit null fields', async () => {
     await Ingredient.collection.insertOne({
       _id: new mongoose.Types.ObjectId(),
-      name: 'Unmigrated active ingredient',
+      name: 'Incomplete canonical active ingredient',
       unit: 'kg',
       stockQuantity: 1,
       costPerUnit: 1,
       reorderLevel: 0,
+      baseUnit: 'g',
+      stockQuantityBase: 1000,
+      reorderLevelBase: 0,
+      averageCostPerBaseUnit: null,
       isActive: true,
     })
 
@@ -1035,6 +1039,16 @@ describe('Inventory Brew API integration', () => {
       .send({ servings: 2, idempotencyKey })
     expect(first.status).toBe(200)
     expect(first.body).toMatchObject({ replayed: false, transactionsCreated: 1 })
+    expect(first.body.consumption[0]).toMatchObject({
+      ingredientId: fixture.ingredientId,
+      ingredientName: 'Production flour idempotent',
+      unit: 'kg',
+      requiredQuantity: 1,
+      requiredQuantityBase: 1000,
+      previousStock: 10,
+      newStock: 9,
+      costPerUnit: 100,
+    })
 
     const event = await CookEvent.findById(first.body.cookEventId).lean()
     expect(event).toMatchObject({
@@ -1076,6 +1090,17 @@ describe('Inventory Brew API integration', () => {
       cookEventId: String(event._id),
       operationId: first.body.operationId,
     })
+    expect(replay.body.consumption[0]).toMatchObject({
+      ingredientId: fixture.ingredientId,
+      ingredientName: 'Production flour idempotent',
+      unit: 'kg',
+      requiredQuantity: 1,
+      requiredQuantityBase: 1000,
+      previousStock: 10,
+      newStock: 9,
+      costPerUnit: 100,
+    })
+    expect(replay.body.consumption).toEqual(first.body.consumption)
     expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(9)
     expect(await CookEvent.countDocuments({ idempotencyKey })).toBe(1)
     expect(
@@ -1088,6 +1113,58 @@ describe('Inventory Brew API integration', () => {
       .send({ servings: 3, idempotencyKey })
     expect(reused.status).toBe(409)
     expect(reused.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED')
+  })
+
+  test('idempotent replay rejects incomplete production ledger history without mutating stock', async () => {
+    const fixture = await createProductionFixture(' incomplete replay')
+    const idempotencyKey = '66666666-6666-4666-8666-666666666666'
+    const first = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 2, idempotencyKey })
+    expect(first.status).toBe(200)
+
+    await InventoryTransaction.deleteOne({
+      operationId: first.body.operationId,
+      referenceType: 'recipe',
+      referenceId: fixture.recipeId,
+      type: 'OUT',
+    })
+
+    const replay = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 2, idempotencyKey })
+    expect(replay.status).toBe(500)
+    expect(replay.body.error).toMatchObject({
+      code: 'PRODUCTION_HISTORY_INCOMPLETE',
+      message: 'Production history is incomplete for this idempotent replay',
+    })
+    expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(9)
+    expect(await CookEvent.countDocuments({ idempotencyKey })).toBe(1)
+  })
+
+  test('cook preview uses the transactional stock sufficiency boundary exactly', async () => {
+    const fixture = await createProductionFixture(' exact preview boundary')
+    await Ingredient.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(fixture.ingredientId) },
+      { $set: { stockQuantityBase: 500 - 1e-10 } },
+    )
+
+    const preview = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook-preview`)
+      .send({ servings: 1 })
+    expect(preview.status).toBe(200)
+    expect(preview.body).toMatchObject({ canCook: false })
+    expect(preview.body.requirements[0]).toMatchObject({
+      requiredQuantityBase: 500,
+      availableQuantityBase: 500 - 1e-10,
+      canSatisfy: false,
+    })
+
+    const cook = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 1, idempotencyKey: '77777777-7777-4777-8777-777777777777' })
+    expect(cook.status).toBe(400)
+    expect(cook.body.error.code).toBe('INSUFFICIENT_STOCK')
   })
 
   test('CookEvent failure rolls stock and ledger back together', async () => {

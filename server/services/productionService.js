@@ -75,7 +75,7 @@ const buildProductionPlan = ({ recipe, ingredients, servings }) => {
       availableQuantityBase,
       shortfall: convertFromBase(shortfallBase, ingredient.unit),
       shortfallBase,
-      canSatisfy: shortfallBase <= FLOOR_EPSILON,
+      canSatisfy: availableQuantityBase >= requiredQuantityBase,
       costPerUnit: ingredient.costPerUnit,
       averageCostPerBaseUnit: ingredient.averageCostPerBaseUnit,
       estimatedLineCost: requiredQuantityBase * ingredient.averageCostPerBaseUnit,

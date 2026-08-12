@@ -91,9 +91,36 @@ export const ProductionPage = () => {
   }, [loadProduction])
 
   useEffect(() => {
-    void listRecipes({ includeInactive: true, page: 1, limit: 100, sortBy: 'name' })
-      .then((response) => setRecipes(response.items))
-      .catch(() => setRecipes([]))
+    let active = true
+    const loadRecipeCatalog = async () => {
+      try {
+        const catalog: Recipe[] = []
+        let catalogPage = 1
+        let totalPages = 1
+
+        do {
+          const response = await listRecipes({
+            includeInactive: true,
+            page: catalogPage,
+            limit: 100,
+            sortBy: 'name',
+            sortOrder: 'asc',
+          })
+          catalog.push(...response.items)
+          totalPages = response.pagination.totalPages
+          catalogPage += 1
+        } while (catalogPage <= totalPages)
+
+        if (active) setRecipes(catalog)
+      } catch {
+        if (active) setRecipes([])
+      }
+    }
+
+    void loadRecipeCatalog()
+    return () => {
+      active = false
+    }
   }, [])
 
   return (

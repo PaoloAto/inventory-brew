@@ -3,6 +3,7 @@ const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const Recipe = require('../models/Recipe')
 const CookEvent = require('../models/CookEvent')
+const InventoryTransaction = require('../models/InventoryTransaction')
 const { calculateRecipeMetrics } = require('../services/recipeMetricsService')
 const {
   areUnitsCompatible,
@@ -294,25 +295,53 @@ const validateIngredientReferences = async (ingredientLines, { requireCanonical 
   return { details, ingredientMap, lines }
 }
 
-const replayResult = (event) => ({
-  recipe: { _id: event.recipeId, name: event.recipeNameSnapshot },
-  servings: event.servings,
-  consumption: event.ingredients.map((line) => ({
-    ingredientId: line.ingredientId,
-    ingredientName: line.ingredientNameSnapshot,
-    unit: line.displayUnit,
-    requiredQuantity: line.quantity,
-    requiredQuantityBase: line.quantityBase,
-    costPerUnit: line.costPerUnitSnapshot,
-  })),
-  transactionsCreated: event.ingredients.length,
-  operationId: event.operationId,
-  cookEvent: event,
-  replayed: true,
-  executionMode: 'transaction',
-})
+const buildReplayResult = async (event, session) => {
+  let transactionQuery = InventoryTransaction.find({
+    operationId: event.operationId,
+    referenceType: 'recipe',
+    referenceId: event.recipeId,
+    type: 'OUT',
+  }).lean()
+  if (session) transactionQuery = transactionQuery.session(session)
+  const transactions = await transactionQuery
+  const transactionByIngredientId = new Map(
+    transactions.map((transaction) => [String(transaction.ingredientId), transaction]),
+  )
 
-const validateIdempotentReplay = (event, recipeId, servings) => {
+  const consumption = event.ingredients.map((line) => {
+    const transaction = transactionByIngredientId.get(String(line.ingredientId))
+    if (!transaction) {
+      throw createAppError(
+        500,
+        'PRODUCTION_HISTORY_INCOMPLETE',
+        'Production history is incomplete for this idempotent replay',
+      )
+    }
+    return {
+      ingredientId: line.ingredientId,
+      ingredientName: line.ingredientNameSnapshot,
+      unit: line.displayUnit,
+      requiredQuantity: line.quantity,
+      requiredQuantityBase: line.quantityBase,
+      previousStock: transaction.previousStock,
+      newStock: transaction.newStock,
+      costPerUnit: line.costPerUnitSnapshot,
+    }
+  })
+
+  return {
+    recipe: { _id: event.recipeId, name: event.recipeNameSnapshot },
+    servings: event.servings,
+    consumption,
+    transactionsCreated: event.ingredients.length,
+    operationId: event.operationId,
+    cookEvent: event,
+    replayed: true,
+    executionMode: 'transaction',
+  }
+}
+
+const validateIdempotentReplay = async (event, recipeId, servings, session) => {
   if (String(event.recipeId) !== String(recipeId) || event.servings !== servings) {
     throw createAppError(
       409,
@@ -320,7 +349,7 @@ const validateIdempotentReplay = (event, recipeId, servings) => {
       'Idempotency key was already used for a different cook request',
     )
   }
-  return replayResult(event)
+  return buildReplayResult(event, session)
 }
 
 const executeCookWithTransaction = async ({ recipeId, servings, idempotencyKey }) => {
@@ -333,7 +362,7 @@ const executeCookWithTransaction = async ({ recipeId, servings, idempotencyKey }
       if (idempotencyKey) {
         const existing = await CookEvent.findOne({ idempotencyKey }).session(session)
         if (existing) {
-          result = validateIdempotentReplay(existing, recipeId, servings)
+          result = await validateIdempotentReplay(existing, recipeId, servings, session)
           return
         }
       }

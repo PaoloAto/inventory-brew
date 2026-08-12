@@ -68,6 +68,11 @@ app.get('/api/ready', async (_req, res) => {
       Ingredient.exists({
         isActive: true,
         $or: [
+          { baseUnit: { $in: [null, ''] } },
+          { baseUnit: { $nin: ['pcs', 'g', 'ml'] } },
+          { stockQuantityBase: { $in: [null] } },
+          { reorderLevelBase: { $in: [null] } },
+          { averageCostPerBaseUnit: { $in: [null] } },
           { baseUnit: { $exists: false } },
           { stockQuantityBase: { $exists: false } },
           { reorderLevelBase: { $exists: false } },
@@ -76,12 +81,16 @@ app.get('/api/ready', async (_req, res) => {
       }),
       Recipe.exists({
         $or: [
+          { yieldServings: { $in: [null] } },
           { yieldServings: { $exists: false } },
           { yieldServings: { $lt: 1 } },
           {
             ingredients: {
               $elemMatch: {
                 $or: [
+                  { quantityBase: { $in: [null] } },
+                  { baseUnit: { $in: [null, ''] } },
+                  { baseUnit: { $nin: ['pcs', 'g', 'ml'] } },
                   { quantityBase: { $exists: false } },
                   { baseUnit: { $exists: false } },
                 ],
