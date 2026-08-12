@@ -82,7 +82,37 @@ export interface RecipeUpdatePayload {
   }>
 }
 
-interface CookRecipeResponse {
+export interface CookPreviewRequirement {
+  ingredientId: string
+  ingredientName: string
+  unit: Unit
+  requiredQuantity: number
+  requiredQuantityBase: number
+  availableQuantity: number
+  availableQuantityBase: number
+  shortfall: number
+  canSatisfy: boolean
+  costPerUnit: number
+  estimatedLineCost: number
+}
+
+export interface CookPreviewResponse {
+  recipe: {
+    id: string
+    name: string
+    yieldServings: number
+    sellingPrice: number
+  }
+  requestedServings: number
+  canCook: boolean
+  maxCookableServings: number
+  estimatedIngredientCost: number
+  expectedRevenue: number
+  estimatedGrossMargin: number
+  requirements: CookPreviewRequirement[]
+}
+
+export interface CookRecipeResponse {
   message: string
   executionMode: 'transaction' | 'fallback'
   recipe: {
@@ -100,6 +130,9 @@ interface CookRecipeResponse {
     costPerUnit: number
   }>
   transactionsCreated: number
+  cookEventId: string
+  operationId: string
+  replayed: boolean
 }
 
 const toRecipe = (dto: RecipeDTO): Recipe => ({
@@ -188,9 +221,20 @@ export const restoreRecipe = async (id: string): Promise<Recipe> => {
   return toRecipe(response.recipe)
 }
 
-export const cookRecipe = async (id: string, servings: number): Promise<CookRecipeResponse> => {
-  return request<CookRecipeResponse>(`/recipes/${id}/cook`, {
+export const previewCook = async (id: string, servings: number): Promise<CookPreviewResponse> => {
+  return request<CookPreviewResponse>(`/recipes/${id}/cook-preview`, {
     method: 'POST',
     body: { servings },
+  })
+}
+
+export const cookRecipe = async (
+  id: string,
+  servings: number,
+  idempotencyKey: string,
+): Promise<CookRecipeResponse> => {
+  return request<CookRecipeResponse>(`/recipes/${id}/cook`, {
+    method: 'POST',
+    body: { servings, idempotencyKey },
   })
 }

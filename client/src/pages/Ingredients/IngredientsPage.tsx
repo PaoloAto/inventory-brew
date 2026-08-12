@@ -271,16 +271,21 @@ export const IngredientsPage = () => {
   const handleArchiveSelected = async () => {
     if (selectedIds.length === 0) return
     const idsToArchive = [...selectedIds]
-    try {
-      await Promise.all(idsToArchive.map((id) => archiveIngredient(id)))
-      setSelectedIds([])
-      showSnackbar(`${idsToArchive.length} ingredient${idsToArchive.length === 1 ? '' : 's'} archived`, {
+    const results = await Promise.allSettled(idsToArchive.map((id) => archiveIngredient(id)))
+    const succeededIds = idsToArchive.filter((_id, index) => results[index].status === 'fulfilled')
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+
+    setSelectedIds((previous) => previous.filter((id) => !succeededIds.includes(id)))
+    await Promise.all([loadIngredients(), loadIngredientMeta()])
+
+    if (succeededIds.length > 0) {
+      showSnackbar(`${succeededIds.length} ingredient${succeededIds.length === 1 ? '' : 's'} archived`, {
         severity: 'info',
         actionLabel: 'Undo',
         onAction: () => {
           void (async () => {
             try {
-              await Promise.all(idsToArchive.map((id) => restoreIngredient(id)))
+              await Promise.all(succeededIds.map((id) => restoreIngredient(id)))
               await Promise.all([loadIngredients(), loadIngredientMeta()])
               showSnackbar('Ingredients restored', { severity: 'success' })
             } catch (error) {
@@ -289,9 +294,12 @@ export const IngredientsPage = () => {
           })()
         },
       })
-      await Promise.all([loadIngredients(), loadIngredientMeta()])
-    } catch (error) {
-      showSnackbar(getErrorMessage(error, 'Failed to archive ingredients'), { severity: 'error' })
+    }
+    if (failures.length > 0) {
+      showSnackbar(
+        failures.map((result) => getErrorMessage(result.reason, 'Failed to archive ingredient')).join('; '),
+        { severity: 'error' },
+      )
     }
   }
 

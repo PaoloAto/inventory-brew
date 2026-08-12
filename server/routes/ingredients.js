@@ -293,7 +293,7 @@ const sendIngredientInUse = (res, dependentRecipes) =>
     409,
     'INGREDIENT_IN_USE',
     'Ingredient is used by active recipes and cannot be archived',
-    dependentRecipes.map((recipe) => ({ id: String(recipe._id), name: recipe.name })),
+    dependentRecipes.map((recipe) => `${recipe.name} (${String(recipe._id)})`),
   )
 
 // GET /api/ingredients - list ingredients with search/filter/sort/pagination

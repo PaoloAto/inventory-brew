@@ -5,6 +5,7 @@ const app = require('../app')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const CookEvent = require('../models/CookEvent')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const {
   getBaseUnit,
@@ -21,6 +22,22 @@ jest.setTimeout(120000)
 describe('Inventory Brew API integration', () => {
   let mongoServer
 
+  const createProductionFixture = async (suffix = '') => {
+    const ingredientResponse = await request(app).post('/api/ingredients').send({
+      name: `Production flour${suffix}`,
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 100,
+    })
+    const recipeResponse = await request(app).post('/api/recipes').send({
+      name: `Production bread${suffix}`,
+      sellingPrice: 100,
+      yieldServings: 4,
+      ingredients: [{ ingredientId: ingredientResponse.body._id, quantity: 2, unit: 'kg' }],
+    })
+    return { ingredientId: ingredientResponse.body._id, recipeId: recipeResponse.body._id }
+  }
+
   beforeAll(async () => {
     mongoServer = await MongoMemoryReplSet.create({
       replSet: {
@@ -29,6 +46,7 @@ describe('Inventory Brew API integration', () => {
       },
     })
     await mongoose.connect(mongoServer.getUri(), { dbName: 'inventory-brew-test' })
+    await CookEvent.init()
   })
 
   afterEach(async () => {
@@ -36,6 +54,7 @@ describe('Inventory Brew API integration', () => {
       Ingredient.deleteMany({}),
       Recipe.deleteMany({}),
       InventoryTransaction.deleteMany({}),
+      CookEvent.deleteMany({}),
     ])
   })
 
@@ -303,7 +322,7 @@ describe('Inventory Brew API integration', () => {
     expect(blockedArchive.status).toBe(409)
     expect(blockedArchive.body.error.code).toBe('INGREDIENT_IN_USE')
     expect(blockedArchive.body.error.details).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'Protected recipe' })]),
+      expect.arrayContaining([expect.stringContaining('Protected recipe')]),
     )
     const blockedPutArchive = await request(app)
       .put(`/api/ingredients/${ingredientResponse.body._id}`)
@@ -493,6 +512,114 @@ describe('Inventory Brew API integration', () => {
       isActive: true,
     })
     await expect(runMigration('apply')).rejects.toThrow('Migration refused')
+  })
+
+  test('migration verify detects canonical equivalence mismatches', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Mismatched canonical ingredient',
+      unit: 'kg',
+      stockQuantity: 2,
+      reorderLevel: 1,
+      costPerUnit: 100,
+    })
+    const recipe = await Recipe.create({
+      name: 'Mismatched canonical recipe',
+      sellingPrice: 10,
+      ingredients: [{ ingredientId: ingredient._id, quantity: 1, unit: 'kg' }],
+    })
+    await Ingredient.collection.updateOne(
+      { _id: ingredient._id },
+      { $set: { stockQuantityBase: 1999 } },
+    )
+    await Recipe.collection.updateOne(
+      { _id: recipe._id },
+      { $set: { 'ingredients.0.quantityBase': 999 } },
+    )
+
+    const verification = await runMigration('verify')
+    expect(verification.ok).toBe(false)
+    expect(verification.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'ingredient', issue: 'Invalid canonical fields' }),
+        expect.objectContaining({ type: 'recipeLine', issue: 'Invalid canonical fields' }),
+      ]),
+    )
+  })
+
+  test('concurrent priced receipts preserve weighted-average valuation', async () => {
+    const ingredientResponse = await request(app).post('/api/ingredients').send({
+      name: 'Concurrent priced flour',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 100,
+    })
+
+    const responses = await Promise.all(
+      [160, 200].map((unitCost) =>
+        request(app)
+          .post(`/api/ingredients/${ingredientResponse.body._id}/adjust-stock`)
+          .send({ type: 'IN', quantity: 5, unitCost }),
+      ),
+    )
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(await Ingredient.findById(ingredientResponse.body._id).lean()).toMatchObject({
+      stockQuantity: 20,
+      stockQuantityBase: 20000,
+      costPerUnit: 140,
+      averageCostPerBaseUnit: 0.14,
+    })
+    expect(
+      await InventoryTransaction.countDocuments({
+        ingredientId: ingredientResponse.body._id,
+        type: 'IN',
+        reasonCode: 'MANUAL_RECEIPT',
+      }),
+    ).toBe(2)
+  })
+
+  test('recipe restore rejects invalid canonical lines before activation', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Restore canonical fixture',
+      unit: 'kg',
+      stockQuantity: 5,
+      costPerUnit: 10,
+    })
+    const recipe = await Recipe.create({
+      name: 'Broken archived recipe',
+      sellingPrice: 20,
+      ingredients: [{ ingredientId: ingredient._id, quantity: 1, unit: 'kg' }],
+      isActive: false,
+    })
+    await Recipe.collection.updateOne(
+      { _id: recipe._id },
+      { $set: { 'ingredients.0.quantityBase': 0 } },
+    )
+
+    const response = await request(app).patch(`/api/recipes/${recipe._id}/restore`)
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('INVALID_RECIPE_CONFIGURATION')
+    expect((await Recipe.findById(recipe._id)).isActive).toBe(false)
+  })
+
+  test('readiness reports canonical migration presence gaps', async () => {
+    await Ingredient.collection.insertOne({
+      _id: new mongoose.Types.ObjectId(),
+      name: 'Unmigrated active ingredient',
+      unit: 'kg',
+      stockQuantity: 1,
+      costPerUnit: 1,
+      reorderLevel: 0,
+      isActive: true,
+    })
+
+    const response = await request(app).get('/api/ready')
+    expect(response.status).toBe(503)
+    expect(response.body).toMatchObject({
+      status: 'not_ready',
+      dbConnected: true,
+      transactionsSupported: true,
+      canonicalDataReady: false,
+    })
   })
 
   test('stale ADJUST returns STOCK_CHANGED without stock or ledger changes', async () => {
@@ -857,6 +984,184 @@ describe('Inventory Brew API integration', () => {
     expect(new Set(outTransactions.map((transaction) => transaction.operationId))).toEqual(
       new Set([cookResponse.body.operationId]),
     )
+    expect(await CookEvent.countDocuments({ recipeId: recipeResponse.body._id })).toBe(1)
+  })
+
+  test('cook preview is read-only, reports maximum servings, and returns shortages as data', async () => {
+    const fixture = await createProductionFixture(' preview')
+    const beforeTransactions = await InventoryTransaction.countDocuments()
+
+    const preview = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook-preview`)
+      .send({ servings: 2 })
+    expect(preview.status).toBe(200)
+    expect(preview.body).toMatchObject({
+      requestedServings: 2,
+      canCook: true,
+      maxCookableServings: 20,
+      estimatedIngredientCost: 100,
+      expectedRevenue: 200,
+      estimatedGrossMargin: 100,
+    })
+    expect(preview.body.requirements[0]).toMatchObject({
+      unit: 'kg',
+      requiredQuantity: 1,
+      requiredQuantityBase: 1000,
+      availableQuantity: 10,
+      availableQuantityBase: 10000,
+      shortfall: 0,
+      canSatisfy: true,
+      estimatedLineCost: 100,
+    })
+    expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(10)
+    expect(await InventoryTransaction.countDocuments()).toBe(beforeTransactions)
+    expect(await CookEvent.countDocuments()).toBe(0)
+
+    const shortage = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook-preview`)
+      .send({ servings: 21 })
+    expect(shortage.status).toBe(200)
+    expect(shortage.body.canCook).toBe(false)
+    expect(shortage.body.maxCookableServings).toBe(20)
+    expect(shortage.body.requirements[0]).toMatchObject({ canSatisfy: false, shortfall: 0.5 })
+  })
+
+  test('idempotent cooking stores immutable economic snapshots and mutates inventory once', async () => {
+    const fixture = await createProductionFixture(' idempotent')
+    const idempotencyKey = '11111111-1111-4111-8111-111111111111'
+
+    const first = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 2, idempotencyKey })
+    expect(first.status).toBe(200)
+    expect(first.body).toMatchObject({ replayed: false, transactionsCreated: 1 })
+
+    const event = await CookEvent.findById(first.body.cookEventId).lean()
+    expect(event).toMatchObject({
+      operationId: first.body.operationId,
+      idempotencyKey,
+      recipeId: expect.any(mongoose.Types.ObjectId),
+      servings: 2,
+      yieldServingsSnapshot: 4,
+      sellingPricePerServingSnapshot: 100,
+      totalIngredientCost: 100,
+      expectedRevenue: 200,
+      grossMarginTotal: 100,
+      costPerServingSnapshot: 50,
+      grossMarginPerServingSnapshot: 50,
+      marginPercentSnapshot: 50,
+    })
+    expect(event.ingredients[0]).toMatchObject({
+      ingredientNameSnapshot: 'Production flour idempotent',
+      displayUnit: 'kg',
+      baseUnit: 'g',
+      quantity: 1,
+      quantityBase: 1000,
+      costPerUnitSnapshot: 100,
+      averageCostPerBaseUnitSnapshot: 0.1,
+      lineCost: 100,
+    })
+    expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(9)
+    expect(
+      await InventoryTransaction.countDocuments({ referenceId: fixture.recipeId, type: 'OUT' }),
+    ).toBe(1)
+
+    await request(app).put(`/api/ingredients/${fixture.ingredientId}`).send({ costPerUnit: 200 })
+    const replay = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 2, idempotencyKey })
+    expect(replay.status).toBe(200)
+    expect(replay.body).toMatchObject({
+      replayed: true,
+      cookEventId: String(event._id),
+      operationId: first.body.operationId,
+    })
+    expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(9)
+    expect(await CookEvent.countDocuments({ idempotencyKey })).toBe(1)
+    expect(
+      await InventoryTransaction.countDocuments({ referenceId: fixture.recipeId, type: 'OUT' }),
+    ).toBe(1)
+    expect((await CookEvent.findById(event._id)).totalIngredientCost).toBe(100)
+
+    const reused = await request(app)
+      .post(`/api/recipes/${fixture.recipeId}/cook`)
+      .send({ servings: 3, idempotencyKey })
+    expect(reused.status).toBe(409)
+    expect(reused.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED')
+  })
+
+  test('CookEvent failure rolls stock and ledger back together', async () => {
+    const fixture = await createProductionFixture(' rollback')
+    const transactionCount = await InventoryTransaction.countDocuments()
+    const eventSpy = jest.spyOn(CookEvent, 'create').mockRejectedValueOnce(new Error('forced event failure'))
+
+    try {
+      const response = await request(app)
+        .post(`/api/recipes/${fixture.recipeId}/cook`)
+        .send({ servings: 2, idempotencyKey: '22222222-2222-4222-8222-222222222222' })
+      expect(response.status).toBe(500)
+      expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(10)
+      expect(await InventoryTransaction.countDocuments()).toBe(transactionCount)
+      expect(await CookEvent.countDocuments()).toBe(0)
+    } finally {
+      eventSpy.mockRestore()
+    }
+  })
+
+  test('simultaneous identical idempotency keys create one production operation', async () => {
+    const fixture = await createProductionFixture(' race')
+    const idempotencyKey = '33333333-3333-4333-8333-333333333333'
+    const responses = await Promise.all(
+      [1, 2].map(() =>
+        request(app)
+          .post(`/api/recipes/${fixture.recipeId}/cook`)
+          .send({ servings: 2, idempotencyKey }),
+      ),
+    )
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(responses.map((response) => response.body.replayed).sort()).toEqual([false, true])
+    expect(new Set(responses.map((response) => response.body.operationId)).size).toBe(1)
+    expect((await Ingredient.findById(fixture.ingredientId)).stockQuantity).toBe(9)
+    expect(await CookEvent.countDocuments({ idempotencyKey })).toBe(1)
+    expect(
+      await InventoryTransaction.countDocuments({ referenceId: fixture.recipeId, type: 'OUT' }),
+    ).toBe(1)
+  })
+
+  test('production history filters immutable snapshots with pagination and dates', async () => {
+    const first = await createProductionFixture(' history one')
+    const second = await createProductionFixture(' history two')
+    await request(app)
+      .post(`/api/recipes/${first.recipeId}/cook`)
+      .send({ servings: 1, idempotencyKey: '44444444-4444-4444-8444-444444444444' })
+    await request(app)
+      .post(`/api/recipes/${second.recipeId}/cook`)
+      .send({ servings: 2, idempotencyKey: '55555555-5555-4555-8555-555555555555' })
+    await CookEvent.collection.updateOne(
+      { recipeId: new mongoose.Types.ObjectId(first.recipeId) },
+      { $set: { createdAt: new Date('2026-08-01T12:00:00.000Z') } },
+    )
+    await CookEvent.collection.updateOne(
+      { recipeId: new mongoose.Types.ObjectId(second.recipeId) },
+      { $set: { createdAt: new Date('2026-08-10T12:00:00.000Z') } },
+    )
+
+    const filtered = await request(app).get('/api/production').query({
+      recipeId: first.recipeId,
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-01',
+      page: 1,
+      limit: 1,
+      sortOrder: 'asc',
+    })
+    expect(filtered.status).toBe(200)
+    expect(filtered.body.pagination).toMatchObject({ page: 1, limit: 1, total: 1 })
+    expect(filtered.body.items).toHaveLength(1)
+    expect(filtered.body.items[0]).toMatchObject({
+      recipeNameSnapshot: 'Production bread history one',
+      servings: 1,
+    })
   })
 
   test('concurrent cooks leave one complete operation and no partial consumption', async () => {
@@ -1010,5 +1315,6 @@ describe('Inventory Brew API integration', () => {
     expect(readyResponse.body.status).toBe('ready')
     expect(readyResponse.body.dbConnected).toBe(true)
     expect(readyResponse.body.transactionsSupported).toBe(true)
+    expect(readyResponse.body.canonicalDataReady).toBe(true)
   })
 })

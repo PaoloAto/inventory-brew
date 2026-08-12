@@ -20,6 +20,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
 import RestaurantMenuOutlinedIcon from '@mui/icons-material/RestaurantMenuOutlined'
+import SoupKitchenOutlinedIcon from '@mui/icons-material/SoupKitchenOutlined'
 import { NavLink, useLocation } from 'react-router-dom'
 import { ledgerTokens } from '../../theme'
 
@@ -34,6 +35,7 @@ const routeContext: Record<string, string> = {
   '/ingredients': 'Ingredient ledger',
   '/recipes': 'Recipe costing',
   '/transactions': 'Movement ledger',
+  '/production': 'Production history',
 }
 
 export const AppLayout = ({ children }: AppLayoutProps) => {
@@ -47,6 +49,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
       { label: 'Overview', icon: <DashboardOutlinedIcon />, to: '/' },
       { label: 'Ingredients', icon: <Inventory2OutlinedIcon />, to: '/ingredients' },
       { label: 'Recipes', icon: <RestaurantMenuOutlinedIcon />, to: '/recipes' },
+      { label: 'Production', icon: <SoupKitchenOutlinedIcon />, to: '/production' },
       { label: 'Transactions', icon: <ReceiptLongOutlinedIcon />, to: '/transactions' },
     ],
     [],

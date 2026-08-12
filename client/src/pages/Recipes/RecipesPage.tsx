@@ -3,6 +3,7 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import {
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -20,6 +21,8 @@ import {
   createRecipe,
   getRecipeDetails,
   listRecipes,
+  previewCook,
+  type CookPreviewResponse,
   type RecipeDetails,
   updateRecipe,
 } from '../../api/recipes'
@@ -35,6 +38,7 @@ import { DataToolbar } from '../../components/ui/DataToolbar'
 import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
 import { LedgerTableContainer } from '../../components/ui/LedgerTableContainer'
 import { TableSkeleton } from '../../components/ui/TableSkeleton'
+import { formatCurrency, formatQuantity } from '../../components/ui/formatters'
 import {
   TableViewControls,
   type TableColumnOption,
@@ -86,6 +90,10 @@ export const RecipesPage = () => {
   const [cookOpen, setCookOpen] = useState(false)
   const [cookServings, setCookServings] = useState(1)
   const [recipeToCook, setRecipeToCook] = useState<Recipe | null>(null)
+  const [cookPreview, setCookPreview] = useState<CookPreviewResponse | null>(null)
+  const [cookPreviewError, setCookPreviewError] = useState<string | null>(null)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+  const [cookIdempotencyKey, setCookIdempotencyKey] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Recipe | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -152,6 +160,30 @@ export const RecipesPage = () => {
   useEffect(() => {
     void loadRecipes()
   }, [loadRecipes])
+
+  useEffect(() => {
+    if (!cookOpen || !recipeToCook) return
+    let active = true
+    setIsPreviewLoading(true)
+    setCookPreviewError(null)
+
+    void previewCook(recipeToCook.id, cookServings)
+      .then((preview) => {
+        if (active) setCookPreview(preview)
+      })
+      .catch((error) => {
+        if (!active) return
+        setCookPreview(null)
+        setCookPreviewError(getErrorMessage(error, 'Failed to preview this cook'))
+      })
+      .finally(() => {
+        if (active) setIsPreviewLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [cookOpen, cookServings, recipeToCook])
 
   useEffect(() => {
     setPage(0)
@@ -237,21 +269,36 @@ export const RecipesPage = () => {
   }
 
   const handleConfirmCook = async () => {
-    if (!recipeToCook) return
+    if (!recipeToCook || !cookIdempotencyKey) return
     setIsCooking(true)
     try {
-      await cookRecipe(recipeToCook.id, cookServings)
-      showSnackbar(`Cooked ${cookServings} serving${cookServings === 1 ? '' : 's'} of ${recipeToCook.name}`, {
-        severity: 'success',
-      })
+      const response = await cookRecipe(recipeToCook.id, cookServings, cookIdempotencyKey)
+      showSnackbar(
+        response.replayed
+          ? `Cook already recorded for ${recipeToCook.name}`
+          : `Cooked ${cookServings} serving${cookServings === 1 ? '' : 's'} of ${recipeToCook.name}`,
+        { severity: 'success' },
+      )
       setCookOpen(false)
       setRecipeToCook(null)
-      await loadRecipes()
+      setCookPreview(null)
+      setCookIdempotencyKey(null)
+      if (!response.replayed) {
+        await Promise.all([loadRecipes(), loadAvailableIngredients()])
+      }
     } catch (error) {
       showSnackbar(getErrorMessage(error, 'Failed to cook recipe'), { severity: 'error' })
     } finally {
       setIsCooking(false)
     }
+  }
+
+  const closeCookDialog = () => {
+    setCookOpen(false)
+    setRecipeToCook(null)
+    setCookPreview(null)
+    setCookPreviewError(null)
+    setCookIdempotencyKey(null)
   }
 
   return (
@@ -311,6 +358,9 @@ export const RecipesPage = () => {
             onCook={(recipe) => {
               setRecipeToCook(recipe)
               setCookServings(1)
+              setCookPreview(null)
+              setCookPreviewError(null)
+              setCookIdempotencyKey(crypto.randomUUID())
               setCookOpen(true)
             }}
             onView={(recipe) => void handleOpenDetails(recipe)}
@@ -352,8 +402,8 @@ export const RecipesPage = () => {
 
       <Dialog
         open={cookOpen}
-        onClose={isCooking ? undefined : () => setCookOpen(false)}
-        maxWidth="xs"
+        onClose={isCooking ? undefined : closeCookDialog}
+        maxWidth="sm"
         fullWidth
       >
         <DialogTitle>Cook recipe</DialogTitle>
@@ -371,14 +421,73 @@ export const RecipesPage = () => {
               type="number"
               fullWidth
               value={cookServings}
-              onChange={(event) => setCookServings(Math.max(1, Number(event.target.value) || 1))}
+              onChange={(event) => {
+                const nextServings = Math.max(1, Math.floor(Number(event.target.value) || 1))
+                if (nextServings !== cookServings) setCookIdempotencyKey(crypto.randomUUID())
+                setCookServings(nextServings)
+              }}
               inputProps={{ min: 1, step: 1 }}
             />
+            {isPreviewLoading ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">Checking inventory…</Typography>
+              </Stack>
+            ) : cookPreviewError ? (
+              <Typography variant="body2" color="error.main">{cookPreviewError}</Typography>
+            ) : cookPreview ? (
+              <Stack spacing={1.5}>
+                <Typography variant="body2" color="text.secondary">
+                  Maximum available: {cookPreview.maxCookableServings} servings
+                </Typography>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 0.75 }}>Ingredient requirements</Typography>
+                  <Stack spacing={0.75}>
+                    {cookPreview.requirements.map((requirement) => (
+                      <Stack
+                        key={requirement.ingredientId}
+                        direction="row"
+                        justifyContent="space-between"
+                        spacing={2}
+                      >
+                        <Typography variant="body2" color={requirement.canSatisfy ? 'text.primary' : 'error.main'}>
+                          {requirement.ingredientName}
+                        </Typography>
+                        <Typography variant="body2" sx={numericSx} color={requirement.canSatisfy ? 'text.secondary' : 'error.main'}>
+                          {formatQuantity(requirement.requiredQuantity, requirement.unit)} / {formatQuantity(requirement.availableQuantity, requirement.unit)}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Box>
+                <Stack spacing={0.5} sx={{ pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Stack direction="row" justifyContent="space-between">
+                    <Typography variant="body2">Estimated ingredient cost</Typography>
+                    <Typography variant="body2" sx={numericSx}>{formatCurrency(cookPreview.estimatedIngredientCost)}</Typography>
+                  </Stack>
+                  <Stack direction="row" justifyContent="space-between">
+                    <Typography variant="body2">Expected revenue</Typography>
+                    <Typography variant="body2" sx={numericSx}>{formatCurrency(cookPreview.expectedRevenue)}</Typography>
+                  </Stack>
+                  <Stack direction="row" justifyContent="space-between">
+                    <Typography variant="body2">Estimated gross margin</Typography>
+                    <Typography variant="body2" sx={numericSx}>{formatCurrency(cookPreview.estimatedGrossMargin)}</Typography>
+                  </Stack>
+                </Stack>
+                {!cookPreview.canCook ? (
+                  <Typography variant="body2" color="error.main">Inventory is insufficient for this cook.</Typography>
+                ) : null}
+              </Stack>
+            ) : null}
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCookOpen(false)} disabled={isCooking}>Cancel</Button>
-          <Button variant="contained" onClick={() => void handleConfirmCook()} disabled={isCooking}>
+          <Button onClick={closeCookDialog} disabled={isCooking}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleConfirmCook()}
+            disabled={isCooking || isPreviewLoading || !cookPreview?.canCook}
+          >
             {isCooking ? 'Cooking' : 'Cook recipe'}
           </Button>
         </DialogActions>

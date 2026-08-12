@@ -10,6 +10,11 @@ const {
 } = require('../domain/units')
 
 const EPSILON = 1e-8
+const approximatelyEqual = (a, b, epsilon = EPSILON) => {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false
+  const difference = Math.abs(a - b)
+  return difference <= epsilon + epsilon * Math.max(Math.abs(a), Math.abs(b))
+}
 const isFiniteNonNegative = (value) => Number.isFinite(value) && value >= 0
 const isMissing = (value) => value === undefined || value === null
 
@@ -134,12 +139,24 @@ const verifyDocuments = (ingredients, recipes) => {
   const errors = [...report.invalid]
 
   for (const ingredient of ingredients.filter((item) => item.isActive !== false)) {
+    const expectedStockBase = UNIT_DEFINITIONS[ingredient.unit]
+      ? convertToBase(ingredient.stockQuantity, ingredient.unit)
+      : Number.NaN
+    const expectedReorderBase = UNIT_DEFINITIONS[ingredient.unit]
+      ? convertToBase(ingredient.reorderLevel ?? 0, ingredient.unit)
+      : Number.NaN
+    const expectedAverageBase = UNIT_DEFINITIONS[ingredient.unit]
+      ? costPerDisplayUnitToBase(ingredient.costPerUnit, ingredient.unit)
+      : Number.NaN
     if (
       !UNIT_DEFINITIONS[ingredient.unit] ||
       ingredient.baseUnit !== getBaseUnit(ingredient.unit) ||
       !isFiniteNonNegative(ingredient.stockQuantityBase) ||
       !isFiniteNonNegative(ingredient.reorderLevelBase) ||
-      !isFiniteNonNegative(ingredient.averageCostPerBaseUnit)
+      !isFiniteNonNegative(ingredient.averageCostPerBaseUnit) ||
+      !approximatelyEqual(ingredient.stockQuantityBase, expectedStockBase) ||
+      !approximatelyEqual(ingredient.reorderLevelBase, expectedReorderBase) ||
+      !approximatelyEqual(ingredient.averageCostPerBaseUnit, expectedAverageBase)
     ) {
       errors.push({ type: 'ingredient', id: String(ingredient._id), issue: 'Invalid canonical fields' })
     }
@@ -150,11 +167,15 @@ const verifyDocuments = (ingredients, recipes) => {
       errors.push({ type: 'recipe', id: String(recipe._id), issue: 'Invalid yieldServings' })
     }
     for (const [index, line] of (recipe.ingredients || []).entries()) {
+      const expectedQuantityBase = UNIT_DEFINITIONS[line.unit]
+        ? convertToBase(line.quantity, line.unit)
+        : Number.NaN
       if (
         !UNIT_DEFINITIONS[line.unit] ||
         line.baseUnit !== getBaseUnit(line.unit) ||
         !Number.isFinite(line.quantityBase) ||
-        line.quantityBase <= 0
+        line.quantityBase <= 0 ||
+        !approximatelyEqual(line.quantityBase, expectedQuantityBase)
       ) {
         errors.push({ type: 'recipeLine', id: String(recipe._id), index, issue: 'Invalid canonical fields' })
       }
@@ -209,4 +230,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { runMigration, inspectDocuments, verifyDocuments }
+module.exports = { runMigration, inspectDocuments, verifyDocuments, approximatelyEqual }

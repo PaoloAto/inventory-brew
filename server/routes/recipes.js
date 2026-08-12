@@ -1,13 +1,12 @@
 const express = require('express')
 const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
-const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const CookEvent = require('../models/CookEvent')
 const { calculateRecipeMetrics } = require('../services/recipeMetricsService')
 const {
   areUnitsCompatible,
   convertToBase,
-  convertFromBase,
   getBaseUnit,
 } = require('../domain/units')
 const {
@@ -15,6 +14,11 @@ const {
   createOperationId,
   isTransactionUnsupportedError,
 } = require('../services/inventoryService')
+const {
+  buildProductionPlan,
+  calculateMaxCookableServings,
+  buildCookEventSnapshot,
+} = require('../services/productionService')
 
 const router = express.Router()
 
@@ -235,7 +239,7 @@ const validateRecipePayload = ({ payload, isCreate }) => {
   return { details, value }
 }
 
-const validateIngredientReferences = async (ingredientLines) => {
+const validateIngredientReferences = async (ingredientLines, { requireCanonical = false } = {}) => {
   const details = []
 
   const ingredientIds = ingredientLines.map((line) => line.ingredientId)
@@ -263,6 +267,17 @@ const validateIngredientReferences = async (ingredientLines) => {
         `Unit mismatch for ingredient "${ingredient.name}": ${ingredient.unit} is not compatible with ${line.unit}`,
       )
     }
+    if (requireCanonical) {
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+        details.push(`Ingredient "${ingredient.name}" has an invalid display quantity`)
+      }
+      if (!Number.isFinite(line.quantityBase) || line.quantityBase <= 0) {
+        details.push(`Ingredient "${ingredient.name}" has an invalid canonical quantity`)
+      }
+      if (line.baseUnit !== getBaseUnit(line.unit)) {
+        details.push(`Ingredient "${ingredient.name}" has an invalid canonical base unit`)
+      }
+    }
   })
 
   const lines =
@@ -279,91 +294,50 @@ const validateIngredientReferences = async (ingredientLines) => {
   return { details, ingredientMap, lines }
 }
 
-const buildCookPlan = ({ recipe, ingredients, servings }) => {
-  const configurationErrors = []
-  const insufficientErrors = []
+const replayResult = (event) => ({
+  recipe: { _id: event.recipeId, name: event.recipeNameSnapshot },
+  servings: event.servings,
+  consumption: event.ingredients.map((line) => ({
+    ingredientId: line.ingredientId,
+    ingredientName: line.ingredientNameSnapshot,
+    unit: line.displayUnit,
+    requiredQuantity: line.quantity,
+    requiredQuantityBase: line.quantityBase,
+    costPerUnit: line.costPerUnitSnapshot,
+  })),
+  transactionsCreated: event.ingredients.length,
+  operationId: event.operationId,
+  cookEvent: event,
+  replayed: true,
+  executionMode: 'transaction',
+})
 
-  const ingredientMap = new Map(ingredients.map((ingredient) => [String(ingredient._id), ingredient]))
-  const mergedLines = new Map()
-
-  ;(recipe.ingredients || []).forEach((line, index) => {
-    const ingredientId = String(line.ingredientId)
-
-    if (mergedLines.has(ingredientId)) {
-      const existing = mergedLines.get(ingredientId)
-      if (existing.unit !== line.unit) {
-        configurationErrors.push(
-          `Recipe contains conflicting units for ingredient ${ingredientId} at line ${index + 1}`,
-        )
-        return
-      }
-
-      existing.requiredQuantityBase += (line.quantityBase * servings) / recipe.yieldServings
-      return
-    }
-
-    mergedLines.set(ingredientId, {
-      ingredientId: line.ingredientId,
-      unit: line.unit,
-      baseUnit: line.baseUnit,
-      requiredQuantityBase: (line.quantityBase * servings) / recipe.yieldServings,
-    })
-  })
-
-  const requirements = [...mergedLines.values()].map((line) => {
-    const ingredient = ingredientMap.get(String(line.ingredientId))
-
-    if (!ingredient) {
-      configurationErrors.push(`Ingredient ${String(line.ingredientId)} no longer exists`)
-      return null
-    }
-
-    if (!ingredient.isActive) {
-      configurationErrors.push(`Ingredient "${ingredient.name}" is inactive and cannot be consumed`)
-      return null
-    }
-
-    if (!areUnitsCompatible(ingredient.unit, line.unit) || ingredient.baseUnit !== line.baseUnit) {
-      configurationErrors.push(
-        `Unit mismatch for ingredient "${ingredient.name}": recipe uses ${line.unit}, ingredient unit is ${ingredient.unit}`,
-      )
-      return null
-    }
-
-    const requiredQuantity = convertFromBase(line.requiredQuantityBase, ingredient.unit)
-    if (ingredient.stockQuantityBase < line.requiredQuantityBase) {
-      insufficientErrors.push(
-        `${ingredient.name}: needed ${requiredQuantity} ${ingredient.unit}, available ${ingredient.stockQuantity} ${ingredient.unit}`,
-      )
-    }
-
-    return {
-      ingredientId: ingredient._id,
-      ingredientName: ingredient.name,
-      displayUnit: ingredient.unit,
-      baseUnit: ingredient.baseUnit,
-      requiredQuantity,
-      requiredQuantityBase: line.requiredQuantityBase,
-      availableQuantity: ingredient.stockQuantity,
-      costPerUnit: ingredient.costPerUnit,
-      ingredientDoc: ingredient,
-    }
-  })
-
-  return {
-    configurationErrors,
-    insufficientErrors,
-    requirements: requirements.filter(Boolean),
+const validateIdempotentReplay = (event, recipeId, servings) => {
+  if (String(event.recipeId) !== String(recipeId) || event.servings !== servings) {
+    throw createAppError(
+      409,
+      'IDEMPOTENCY_KEY_REUSED',
+      'Idempotency key was already used for a different cook request',
+    )
   }
+  return replayResult(event)
 }
 
-const executeCookWithTransaction = async ({ recipeId, servings }) => {
+const executeCookWithTransaction = async ({ recipeId, servings, idempotencyKey }) => {
   const session = await mongoose.startSession()
   const operationId = createOperationId()
   let result
 
   try {
     await session.withTransaction(async () => {
+      if (idempotencyKey) {
+        const existing = await CookEvent.findOne({ idempotencyKey }).session(session)
+        if (existing) {
+          result = validateIdempotentReplay(existing, recipeId, servings)
+          return
+        }
+      }
+
       const recipe = await Recipe.findById(recipeId).session(session)
       if (!recipe) {
         throw createAppError(404, 'NOT_FOUND', 'Recipe not found')
@@ -384,7 +358,7 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         )
         .session(session)
 
-      const plan = buildCookPlan({ recipe, ingredients, servings })
+      const plan = buildProductionPlan({ recipe, ingredients, servings })
       if (plan.configurationErrors.length > 0) {
         throw createAppError(
           409,
@@ -394,12 +368,17 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         )
       }
 
-      if (plan.insufficientErrors.length > 0) {
+      if (!plan.canCook) {
         throw createAppError(
           400,
           'INSUFFICIENT_STOCK',
           'Insufficient stock to cook the requested servings',
-          plan.insufficientErrors,
+          plan.requirements
+            .filter((item) => !item.canSatisfy)
+            .map(
+              (item) =>
+                `${item.ingredientName}: needed ${item.requiredQuantity} ${item.unit}, available ${item.availableQuantity} ${item.unit}`,
+            ),
         )
       }
 
@@ -409,7 +388,7 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         movements: plan.requirements.map((requirement) => ({
           ingredientId: requirement.ingredientId,
           ingredientName: requirement.ingredientName,
-          displayUnit: requirement.displayUnit,
+          displayUnit: requirement.unit,
           baseUnit: requirement.baseUnit,
           quantity: requirement.requiredQuantity,
           quantityBase: requirement.requiredQuantityBase,
@@ -422,148 +401,39 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         operationId,
       })
 
+      const [cookEvent] = await CookEvent.create(
+        [
+          buildCookEventSnapshot({
+            recipe,
+            servings,
+            requirements: plan.requirements,
+            operationId,
+            idempotencyKey,
+          }),
+        ],
+        { session },
+      )
+
       result = {
         recipe,
         servings,
         ...stockResult,
+        transactionsCreated: stockResult.transactions.length,
+        cookEvent,
+        replayed: false,
         executionMode: 'transaction',
       }
     })
 
     return result
+  } catch (error) {
+    if (idempotencyKey && error?.code === 11000) {
+      const existing = await CookEvent.findOne({ idempotencyKey })
+      if (existing) return validateIdempotentReplay(existing, recipeId, servings)
+    }
+    throw error
   } finally {
     await session.endSession()
-  }
-}
-
-const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
-  const operationId = createOperationId()
-  const recipe = await Recipe.findById(recipeId)
-  if (!recipe) {
-    throw createAppError(404, 'NOT_FOUND', 'Recipe not found')
-  }
-
-  if (!recipe.isActive) {
-    throw createAppError(409, 'INACTIVE_RESOURCE', 'Cannot cook an inactive recipe')
-  }
-
-  if (!recipe.ingredients || recipe.ingredients.length === 0) {
-    throw createAppError(409, 'INVALID_RECIPE_CONFIGURATION', 'Recipe has no ingredient lines to cook')
-  }
-
-  const ingredientIds = [...new Set(recipe.ingredients.map((line) => String(line.ingredientId)))]
-  const ingredients = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
-    'name unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit',
-  )
-
-  const plan = buildCookPlan({ recipe, ingredients, servings })
-  if (plan.configurationErrors.length > 0) {
-    throw createAppError(
-      409,
-      'INVALID_RECIPE_CONFIGURATION',
-      'Recipe cannot be cooked due to ingredient configuration issues',
-      plan.configurationErrors,
-    )
-  }
-
-  if (plan.insufficientErrors.length > 0) {
-    throw createAppError(
-      400,
-      'INSUFFICIENT_STOCK',
-      'Insufficient stock to cook the requested servings',
-      plan.insufficientErrors,
-    )
-  }
-
-  const applied = []
-
-  try {
-    for (const requirement of plan.requirements) {
-      const previous = await Ingredient.findOneAndUpdate(
-        {
-          _id: requirement.ingredientId,
-          isActive: true,
-          unit: requirement.displayUnit,
-          baseUnit: requirement.baseUnit,
-          stockQuantityBase: { $gte: requirement.requiredQuantityBase },
-        },
-        {
-          $inc: {
-            stockQuantity: -requirement.requiredQuantity,
-            stockQuantityBase: -requirement.requiredQuantityBase,
-          },
-        },
-        { new: false },
-      ).select('name stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit')
-
-      if (!previous) {
-        throw createAppError(
-          400,
-          'INSUFFICIENT_STOCK',
-          'Stock changed while cooking. Please try again.',
-          [`${requirement.ingredientName}: unable to reserve required quantity`],
-        )
-      }
-
-      const previousStock = previous.stockQuantity
-      const newStock = Number((previousStock - requirement.requiredQuantity).toFixed(4))
-
-      applied.push({
-        ingredientId: previous._id,
-        ingredientName: previous.name,
-        unit: requirement.displayUnit,
-        requiredQuantity: requirement.requiredQuantity,
-        requiredQuantityBase: requirement.requiredQuantityBase,
-        previousStock,
-        newStock,
-        costPerUnit: previous.costPerUnit,
-      })
-    }
-
-    const reason = `Cook: ${recipe.name} x ${servings}`
-    const transactions = await InventoryTransaction.insertMany(
-      applied.map((entry) => ({
-        ingredientId: entry.ingredientId,
-        type: 'OUT',
-        quantity: entry.requiredQuantity,
-        deltaQuantity: -entry.requiredQuantity,
-        previousStock: entry.previousStock,
-        newStock: entry.newStock,
-        reason,
-        reasonCode: 'RECIPE_COOK',
-        unitCost: entry.costPerUnit,
-        referenceType: 'recipe',
-        referenceId: recipe._id,
-        operationId,
-      })),
-    )
-
-    return {
-      recipe,
-      servings,
-      consumption: applied,
-      transactions,
-      operationId,
-      executionMode: 'fallback',
-    }
-  } catch (error) {
-    if (applied.length > 0) {
-      await Promise.allSettled(
-          applied.map((entry) =>
-            Ingredient.updateOne(
-              { _id: entry.ingredientId },
-              {
-                $inc: {
-                  stockQuantity: entry.requiredQuantity,
-                  stockQuantityBase: entry.requiredQuantityBase,
-                },
-              },
-            ),
-          ),
-      )
-    }
-
-    throw error
   }
 }
 
@@ -644,7 +514,10 @@ router.patch('/:id/restore', async (req, res) => {
       return res.json({ message: 'Recipe is already active', recipe })
     }
 
-    const ingredientCheck = await validateIngredientReferences(recipe.ingredients)
+    const ingredientCheck = await validateIngredientReferences(recipe.ingredients, { requireCanonical: true })
+    if (!Number.isInteger(recipe.yieldServings) || recipe.yieldServings < 1) {
+      ingredientCheck.details.push('Recipe batch yield must be a positive integer')
+    }
     if (ingredientCheck.details.length > 0) {
       return sendError(
         res,
@@ -666,6 +539,70 @@ router.patch('/:id/restore', async (req, res) => {
 })
 
 // POST /api/recipes/:id/cook - consume ingredients for a recipe
+router.post('/:id/cook-preview', async (req, res) => {
+  try {
+    if (!ensureValidRecipeId(res, req.params.id)) return
+    const servings = parsePositiveServings(req.body?.servings)
+    if (servings === undefined) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid cook preview payload', [
+        'servings is required and must be a positive integer',
+      ])
+    }
+
+    const recipe = await Recipe.findById(req.params.id)
+    if (!recipe) return sendError(res, 404, 'NOT_FOUND', 'Recipe not found')
+    if (!recipe.isActive) {
+      return sendError(res, 409, 'INACTIVE_RESOURCE', 'Cannot preview an inactive recipe')
+    }
+    const ingredientIds = [...new Set(recipe.ingredients.map((line) => String(line.ingredientId)))]
+    const ingredients = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
+      'name unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit',
+    )
+    const plan = buildProductionPlan({ recipe, ingredients, servings })
+    if (plan.configurationErrors.length > 0) {
+      return sendError(
+        res,
+        409,
+        'INVALID_RECIPE_CONFIGURATION',
+        'Recipe cannot be cooked due to ingredient configuration issues',
+        plan.configurationErrors,
+      )
+    }
+
+    const expectedRevenue = recipe.sellingPrice * servings
+    return res.json({
+      recipe: {
+        id: recipe._id,
+        name: recipe.name,
+        yieldServings: recipe.yieldServings,
+        sellingPrice: recipe.sellingPrice,
+      },
+      requestedServings: servings,
+      canCook: plan.canCook,
+      maxCookableServings: calculateMaxCookableServings({ recipe, requirements: plan.requirements }),
+      estimatedIngredientCost: plan.estimatedIngredientCost,
+      expectedRevenue,
+      estimatedGrossMargin: expectedRevenue - plan.estimatedIngredientCost,
+      requirements: plan.requirements.map((item) => ({
+        ingredientId: item.ingredientId,
+        ingredientName: item.ingredientName,
+        unit: item.unit,
+        requiredQuantity: item.requiredQuantity,
+        requiredQuantityBase: item.requiredQuantityBase,
+        availableQuantity: item.availableQuantity,
+        availableQuantityBase: item.availableQuantityBase,
+        shortfall: item.shortfall,
+        canSatisfy: item.canSatisfy,
+        costPerUnit: item.costPerUnit,
+        estimatedLineCost: item.estimatedLineCost,
+      })),
+    })
+  } catch (err) {
+    console.error('Error previewing recipe cook:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to preview recipe cook')
+  }
+})
+
 router.post('/:id/cook', async (req, res) => {
   try {
     if (!ensureValidRecipeId(res, req.params.id)) return
@@ -676,15 +613,31 @@ router.post('/:id/cook', async (req, res) => {
         'servings is required and must be a positive integer',
       ])
     }
+    const rawIdempotencyKey = req.body?.idempotencyKey
+    let idempotencyKey
+    if (rawIdempotencyKey !== undefined) {
+      if (
+        typeof rawIdempotencyKey !== 'string' ||
+        rawIdempotencyKey.trim().length < 8 ||
+        rawIdempotencyKey.trim().length > 128
+      ) {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid cook payload', [
+          'idempotencyKey must be a string between 8 and 128 characters',
+        ])
+      }
+      idempotencyKey = rawIdempotencyKey.trim()
+    }
 
     let result
 
     try {
-      result = await executeCookWithTransaction({ recipeId: req.params.id, servings })
+      result = await executeCookWithTransaction({
+        recipeId: req.params.id,
+        servings,
+        idempotencyKey,
+      })
     } catch (error) {
-      if (isTransactionUnsupportedError(error) && process.env.ALLOW_NON_TRANSACTIONAL_INVENTORY === 'true') {
-        result = await executeCookWithoutTransaction({ recipeId: req.params.id, servings })
-      } else if (isTransactionUnsupportedError(error)) {
+      if (isTransactionUnsupportedError(error)) {
         throw createAppError(
           503,
           'TRANSACTIONS_UNAVAILABLE',
@@ -704,8 +657,10 @@ router.post('/:id/cook', async (req, res) => {
       },
       servings: result.servings,
       consumption: result.consumption,
-      transactionsCreated: result.transactions.length,
+      transactionsCreated: result.transactionsCreated,
       operationId: result.operationId,
+      cookEventId: result.cookEvent._id,
+      replayed: result.replayed,
     })
   } catch (err) {
     if (err?.isAppError) {

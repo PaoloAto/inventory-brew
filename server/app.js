@@ -6,6 +6,9 @@ const ingredientRoutes = require('./routes/ingredients')
 const recipeRoutes = require('./routes/recipes')
 const transactionRoutes = require('./routes/transactions')
 const dashboardRoutes = require('./routes/dashboard')
+const productionRoutes = require('./routes/production')
+const Ingredient = require('./models/Ingredient')
+const Recipe = require('./models/Recipe')
 
 const app = express()
 
@@ -53,13 +56,43 @@ app.get('/api/ready', async (_req, res) => {
       service: 'Inventory Brew API',
       dbConnected,
       transactionsSupported: false,
+      canonicalDataReady: false,
     })
   }
 
   let transactionsSupported = false
+  let canonicalDataReady = false
   try {
-    const hello = await mongoose.connection.db.admin().command({ hello: 1 })
+    const [hello, incompleteIngredient, incompleteRecipe] = await Promise.all([
+      mongoose.connection.db.admin().command({ hello: 1 }),
+      Ingredient.exists({
+        isActive: true,
+        $or: [
+          { baseUnit: { $exists: false } },
+          { stockQuantityBase: { $exists: false } },
+          { reorderLevelBase: { $exists: false } },
+          { averageCostPerBaseUnit: { $exists: false } },
+        ],
+      }),
+      Recipe.exists({
+        $or: [
+          { yieldServings: { $exists: false } },
+          { yieldServings: { $lt: 1 } },
+          {
+            ingredients: {
+              $elemMatch: {
+                $or: [
+                  { quantityBase: { $exists: false } },
+                  { baseUnit: { $exists: false } },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    ])
     transactionsSupported = Boolean(hello.setName || hello.msg === 'isdbgrid')
+    canonicalDataReady = !incompleteIngredient && !incompleteRecipe
   } catch (err) {
     console.error('Error checking MongoDB transaction capability:', err)
   }
@@ -70,6 +103,17 @@ app.get('/api/ready', async (_req, res) => {
       service: 'Inventory Brew API',
       dbConnected,
       transactionsSupported,
+      canonicalDataReady,
+    })
+  }
+
+  if (!canonicalDataReady) {
+    return res.status(503).json({
+      status: 'not_ready',
+      service: 'Inventory Brew API',
+      dbConnected,
+      transactionsSupported,
+      canonicalDataReady,
     })
   }
 
@@ -78,6 +122,7 @@ app.get('/api/ready', async (_req, res) => {
     service: 'Inventory Brew API',
     dbConnected,
     transactionsSupported,
+    canonicalDataReady,
   })
 })
 
@@ -85,6 +130,7 @@ app.use('/api/ingredients', ingredientRoutes)
 app.use('/api/recipes', recipeRoutes)
 app.use('/api/transactions', transactionRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/production', productionRoutes)
 
 app.use('/api', (_req, res) => {
   res.status(404).json({

@@ -35,14 +35,14 @@ export const StockAdjustmentDialog = ({
 }: StockAdjustmentDialogProps) => {
   const [type, setType] = useState<AdjustmentType>('IN')
   const [amount, setAmount] = useState(1)
-  const [unitCost, setUnitCost] = useState(0)
+  const [unitCost, setUnitCost] = useState<number | ''>('')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
 
   const reset = () => {
     setType('IN')
     setAmount(1)
-    setUnitCost(ingredient?.costPerUnit ?? 0)
+    setUnitCost('')
     setReason('')
     setError('')
   }
@@ -57,7 +57,7 @@ export const StockAdjustmentDialog = ({
       setError('Quantity must be greater than zero.')
       return
     }
-    if (type === 'IN' && (!Number.isFinite(unitCost) || unitCost < 0)) {
+    if (type === 'IN' && (unitCost === '' || !Number.isFinite(unitCost) || unitCost < 0)) {
       setError('Unit cost must be a non-negative number.')
       return
     }
@@ -79,7 +79,7 @@ export const StockAdjustmentDialog = ({
             type,
             quantity: amount,
             reason: trimmedReason,
-            ...(type === 'IN' ? { unitCost } : {}),
+            ...(type === 'IN' ? { unitCost: unitCost as number } : {}),
           },
     )
   }
@@ -144,12 +144,12 @@ export const StockAdjustmentDialog = ({
                 label={`Unit cost / ${ingredient.unit}`}
                 value={unitCost}
                 onChange={(event) => {
-                  setUnitCost(Number(event.target.value))
+                  setUnitCost(event.target.value === '' ? '' : Number(event.target.value))
                   setError('')
                 }}
                 fullWidth
                 inputProps={{ min: 0, step: 0.01 }}
-                helperText={`Current average: ${unitCost === ingredient.costPerUnit ? '' : 'previously '}${ingredient.costPerUnit.toFixed(2)} / ${ingredient.unit}`}
+                helperText={`Current average: ${ingredient.costPerUnit.toFixed(2)} / ${ingredient.unit}`}
               />
             ) : null}
 
