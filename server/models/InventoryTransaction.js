@@ -18,6 +18,22 @@ const inventoryTransactionSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    deltaQuantity: Number,
+    operationId: {
+      type: String,
+      index: true,
+    },
+    reasonCode: {
+      type: String,
+      enum: [
+        'INITIAL_STOCK',
+        'MANUAL_RECEIPT',
+        'MANUAL_USAGE',
+        'PHYSICAL_COUNT',
+        'MANUAL_CORRECTION',
+        'RECIPE_COOK',
+      ],
+    },
     previousStock: {
       type: Number,
       required: true,

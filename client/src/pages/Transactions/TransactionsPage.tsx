@@ -28,7 +28,7 @@ import {
   formatCurrency,
   formatDateTime,
   formatQuantity,
-  formatSignedQuantity,
+  formatSignedDelta,
 } from '../../components/ui/formatters'
 import { LedgerEmptyState } from '../../components/ui/LedgerEmptyState'
 import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
@@ -236,6 +236,7 @@ export const TransactionsPage = () => {
             <TableBody>
               {rows.map((transaction) => {
                 const unit = transaction.ingredient?.unit
+                const delta = transaction.deltaQuantity ?? transaction.newStock - transaction.previousStock
                 return (
                   <TableRow key={transaction.id} hover>
                     <TableCell sx={{ ...numericSx, minWidth: 155, color: 'text.secondary' }}>
@@ -270,7 +271,7 @@ export const TransactionsPage = () => {
                         fontWeight: 500,
                       }}
                     >
-                      {formatSignedQuantity(transaction.quantity, transaction.type, unit)}
+                      {formatSignedDelta(delta, unit)}
                     </TableCell>
                     <TableCell align="right" sx={{ ...numericSx, minWidth: 155, whiteSpace: 'nowrap' }}>
                       {formatQuantity(transaction.previousStock, unit)} →{' '}

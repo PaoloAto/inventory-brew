@@ -14,7 +14,7 @@ import {
 import type { AdjustStockPayload } from '../../api/ingredients'
 import type { Ingredient } from '../../types/ingredient'
 import { numericSx } from '../../theme'
-import { formatQuantity } from '../ui/formatters'
+import { formatQuantity, formatSignedDelta } from '../ui/formatters'
 
 interface StockAdjustmentDialogProps {
   open: boolean
@@ -63,7 +63,12 @@ export const StockAdjustmentDialog = ({
     const trimmedReason = reason.trim() || 'Manual stock adjustment'
     onConfirm(
       type === 'ADJUST'
-        ? { type, newStockQuantity: amount, reason: trimmedReason }
+        ? {
+            type,
+            newStockQuantity: amount,
+            expectedCurrentStock: ingredient.stockQuantity,
+            reason: trimmedReason,
+          }
         : { type, quantity: amount, reason: trimmedReason },
     )
   }
@@ -121,6 +126,29 @@ export const StockAdjustmentDialog = ({
               inputProps={{ min: type === 'ADJUST' ? 0 : 0.01, step: 0.01 }}
               helperText={`Unit: ${ingredient.unit}`}
             />
+
+            {type === 'ADJUST' ? (
+              <Stack spacing={0.5} sx={{ px: 0.25 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Current stock{' '}
+                  <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit', color: 'text.primary' }}>
+                    {formatQuantity(ingredient.stockQuantity, ingredient.unit)}
+                  </Typography>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Counted stock{' '}
+                  <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit', color: 'text.primary' }}>
+                    {formatQuantity(amount, ingredient.unit)}
+                  </Typography>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Difference{' '}
+                  <Typography component="span" sx={{ ...numericSx, fontSize: 'inherit', color: 'text.primary' }}>
+                    {formatSignedDelta(amount - ingredient.stockQuantity, ingredient.unit)}
+                  </Typography>
+                </Typography>
+              </Stack>
+            ) : null}
 
             <TextField
               label="Reason"

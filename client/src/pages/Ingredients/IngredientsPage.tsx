@@ -23,7 +23,7 @@ import {
   updateIngredient,
   type AdjustStockPayload,
 } from '../../api/ingredients'
-import { getErrorMessage } from '../../api/error'
+import { getErrorCode, getErrorMessage } from '../../api/error'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
 import {
   IngredientTable,
@@ -254,6 +254,14 @@ export const IngredientsPage = () => {
       setAdjusting(null)
       await loadIngredients()
     } catch (error) {
+      if (getErrorCode(error) === 'STOCK_CHANGED') {
+        setAdjusting(null)
+        await loadIngredients()
+        showSnackbar('Stock changed while you were reviewing this count. The current quantity has been refreshed.', {
+          severity: 'info',
+        })
+        return
+      }
       showSnackbar(getErrorMessage(error, 'Failed to adjust stock'), { severity: 'error' })
     } finally {
       setIsSaving(false)

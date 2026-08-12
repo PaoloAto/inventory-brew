@@ -4,6 +4,7 @@ const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
 const { calculateRecipeMetrics } = require('../services/recipeMetricsService')
+const { consumeStockBatchInSession, createOperationId } = require('../services/inventoryService')
 
 const router = express.Router()
 
@@ -322,6 +323,7 @@ const isTransactionUnsupportedError = (error) => {
 
 const executeCookWithTransaction = async ({ recipeId, servings }) => {
   const session = await mongoose.startSession()
+  const operationId = createOperationId()
   let result
 
   try {
@@ -363,48 +365,27 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         )
       }
 
-      const consumption = []
-
-      for (const requirement of plan.requirements) {
-        const ingredient = requirement.ingredientDoc
-        const previousStock = ingredient.stockQuantity
-        const newStock = Number((previousStock - requirement.requiredQuantity).toFixed(4))
-
-        ingredient.stockQuantity = newStock
-        await ingredient.save({ session })
-
-        consumption.push({
-          ingredientId: ingredient._id,
-          ingredientName: ingredient.name,
-          unit: requirement.unit,
-          requiredQuantity: requirement.requiredQuantity,
-          previousStock,
-          newStock,
-          costPerUnit: ingredient.costPerUnit,
-        })
-      }
-
       const reason = `Cook: ${recipe.name} x ${servings}`
-      const transactions = await InventoryTransaction.insertMany(
-        consumption.map((entry) => ({
-          ingredientId: entry.ingredientId,
-          type: 'OUT',
-          quantity: entry.requiredQuantity,
-          previousStock: entry.previousStock,
-          newStock: entry.newStock,
-          reason,
-          unitCost: entry.costPerUnit,
-          referenceType: 'recipe',
-          referenceId: recipe._id,
+      const stockResult = await consumeStockBatchInSession({
+        session,
+        movements: plan.requirements.map((requirement) => ({
+          ingredientId: requirement.ingredientId,
+          ingredientName: requirement.ingredientName,
+          unit: requirement.unit,
+          quantity: requirement.requiredQuantity,
+          costPerUnit: requirement.costPerUnit,
         })),
-        { session },
-      )
+        reason,
+        reasonCode: 'RECIPE_COOK',
+        referenceType: 'recipe',
+        referenceId: recipe._id,
+        operationId,
+      })
 
       result = {
         recipe,
         servings,
-        consumption,
-        transactions,
+        ...stockResult,
         executionMode: 'transaction',
       }
     })
@@ -416,6 +397,7 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
 }
 
 const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
+  const operationId = createOperationId()
   const recipe = await Recipe.findById(recipeId)
   if (!recipe) {
     throw createAppError(404, 'NOT_FOUND', 'Recipe not found')
@@ -495,12 +477,15 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
         ingredientId: entry.ingredientId,
         type: 'OUT',
         quantity: entry.requiredQuantity,
+        deltaQuantity: -entry.requiredQuantity,
         previousStock: entry.previousStock,
         newStock: entry.newStock,
         reason,
+        reasonCode: 'RECIPE_COOK',
         unitCost: entry.costPerUnit,
         referenceType: 'recipe',
         referenceId: recipe._id,
+        operationId,
       })),
     )
 
@@ -509,6 +494,7 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
       servings,
       consumption: applied,
       transactions,
+      operationId,
       executionMode: 'fallback',
     }
   } catch (error) {
@@ -626,8 +612,14 @@ router.post('/:id/cook', async (req, res) => {
     try {
       result = await executeCookWithTransaction({ recipeId: req.params.id, servings })
     } catch (error) {
-      if (isTransactionUnsupportedError(error)) {
+      if (isTransactionUnsupportedError(error) && process.env.ALLOW_NON_TRANSACTIONAL_INVENTORY === 'true') {
         result = await executeCookWithoutTransaction({ recipeId: req.params.id, servings })
+      } else if (isTransactionUnsupportedError(error)) {
+        throw createAppError(
+          503,
+          'TRANSACTIONS_UNAVAILABLE',
+          'Inventory operations require MongoDB transaction support.',
+        )
       } else {
         throw error
       }
@@ -643,6 +635,7 @@ router.post('/:id/cook', async (req, res) => {
       servings: result.servings,
       consumption: result.consumption,
       transactionsCreated: result.transactions.length,
+      operationId: result.operationId,
     })
   } catch (err) {
     if (err?.isAppError) {

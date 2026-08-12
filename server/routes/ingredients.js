@@ -3,6 +3,7 @@ const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const { calculateStockStatus } = require('../domain/stockStatus')
+const { createIngredientWithInitialStock, adjustIngredientStock } = require('../services/inventoryService')
 
 const router = express.Router()
 
@@ -22,7 +23,20 @@ const CREATE_ALLOWED_FIELDS = new Set([
   'isActive',
 ])
 const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'isActive'])
-const ADJUST_ALLOWED_FIELDS = new Set(['type', 'quantity', 'newStockQuantity', 'reason', 'unitCost'])
+const ADJUST_ALLOWED_FIELDS = new Set([
+  'type',
+  'quantity',
+  'newStockQuantity',
+  'expectedCurrentStock',
+  'reason',
+  'reasonCode',
+  'unitCost',
+])
+const ADJUST_REASON_CODES = {
+  IN: ['MANUAL_RECEIPT'],
+  OUT: ['MANUAL_USAGE'],
+  ADJUST: ['PHYSICAL_COUNT', 'MANUAL_CORRECTION'],
+}
 
 const normalizeIngredient = (ingredient) => {
   const normalized = typeof ingredient.toObject === 'function' ? ingredient.toObject() : ingredient
@@ -205,6 +219,7 @@ const validateAdjustPayload = (payload) => {
 
   let quantity
   let newStockQuantity
+  let expectedCurrentStock
 
   if (type === 'IN' || type === 'OUT') {
     quantity = Number(payload.quantity)
@@ -217,6 +232,19 @@ const validateAdjustPayload = (payload) => {
     newStockQuantity = Number(payload.newStockQuantity)
     if (!Number.isFinite(newStockQuantity) || newStockQuantity < 0) {
       details.push('newStockQuantity must be a non-negative number for ADJUST')
+    }
+
+    expectedCurrentStock = Number(payload.expectedCurrentStock)
+    if (!Number.isFinite(expectedCurrentStock)) {
+      details.push('expectedCurrentStock must be a finite number for ADJUST')
+    }
+  }
+
+  let reasonCode
+  if (payload.reasonCode !== undefined) {
+    reasonCode = typeof payload.reasonCode === 'string' ? payload.reasonCode.trim() : ''
+    if (!ADJUST_REASON_CODES[type]?.includes(reasonCode)) {
+      details.push(`reasonCode must be one of: ${ADJUST_REASON_CODES[type].join(', ')}`)
     }
   }
 
@@ -234,7 +262,9 @@ const validateAdjustPayload = (payload) => {
       type,
       quantity,
       newStockQuantity,
+      expectedCurrentStock,
       reason,
+      reasonCode,
       unitCost,
     },
   }
@@ -348,56 +378,26 @@ router.post('/:id/adjust-stock', async (req, res) => {
   try {
     if (!ensureValidIngredientId(res, req.params.id)) return
 
-    const ingredient = await Ingredient.findById(req.params.id)
-    if (!ingredient) {
-      return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
-    }
-
-    if (!ingredient.isActive) {
-      return sendError(res, 409, 'INACTIVE_RESOURCE', 'Cannot adjust stock for an inactive ingredient')
-    }
-
     const { details, value } = validateAdjustPayload(req.body || {})
     if (details.length > 0) {
       return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid stock adjustment payload', details)
     }
 
-    const previousStock = ingredient.stockQuantity
-    const nextStock =
-      value.type === 'IN'
-        ? previousStock + value.quantity
-        : value.type === 'OUT'
-          ? previousStock - value.quantity
-          : value.newStockQuantity
-
-    if (nextStock < 0) {
-      return sendError(res, 400, 'INSUFFICIENT_STOCK', 'Stock cannot go negative', [
-        `Current stock is ${previousStock}`,
-      ])
-    }
-
-    ingredient.stockQuantity = nextStock
-    await ingredient.save()
-
-    const normalizedQuantity =
-      value.type === 'ADJUST' ? Math.abs(value.newStockQuantity - previousStock) : value.quantity
-
-    const transaction = await InventoryTransaction.create({
-      ingredientId: ingredient._id,
-      type: value.type,
-      quantity: normalizedQuantity,
-      previousStock,
-      newStock: nextStock,
-      reason: value.reason,
-      unitCost: value.type === 'IN' ? (value.unitCost ?? ingredient.costPerUnit) : value.unitCost,
+    const { ingredient, transaction, operationId } = await adjustIngredientStock({
+      ingredientId: req.params.id,
+      ...value,
     })
 
     res.json({
       message: 'Stock adjusted successfully',
       ingredient: normalizeIngredient(ingredient),
       transaction,
+      operationId,
     })
   } catch (err) {
+    if (err?.isAppError) {
+      return sendError(res, err.status, err.code, err.message, err.details)
+    }
     console.error('Error adjusting stock:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to adjust stock')
   }
@@ -491,20 +491,7 @@ router.post('/', async (req, res) => {
       return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', details)
     }
 
-    const ingredient = new Ingredient(value)
-    const saved = await ingredient.save()
-
-    if (saved.stockQuantity > 0 && saved.isActive) {
-      await InventoryTransaction.create({
-        ingredientId: saved._id,
-        type: 'IN',
-        quantity: saved.stockQuantity,
-        previousStock: 0,
-        newStock: saved.stockQuantity,
-        reason: 'Initial stock',
-        unitCost: saved.costPerUnit,
-      })
-    }
+    const { ingredient: saved } = await createIngredientWithInitialStock({ ingredientData: value })
 
     res.status(201).json(normalizeIngredient(saved))
   } catch (err) {

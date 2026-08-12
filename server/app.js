@@ -44,7 +44,7 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
-app.get('/api/ready', (_req, res) => {
+app.get('/api/ready', async (_req, res) => {
   const dbConnected = mongoose.connection.readyState === 1
 
   if (!dbConnected) {
@@ -52,6 +52,24 @@ app.get('/api/ready', (_req, res) => {
       status: 'not_ready',
       service: 'Inventory Brew API',
       dbConnected,
+      transactionsSupported: false,
+    })
+  }
+
+  let transactionsSupported = false
+  try {
+    const hello = await mongoose.connection.db.admin().command({ hello: 1 })
+    transactionsSupported = Boolean(hello.setName || hello.msg === 'isdbgrid')
+  } catch (err) {
+    console.error('Error checking MongoDB transaction capability:', err)
+  }
+
+  if (!transactionsSupported) {
+    return res.status(503).json({
+      status: 'not_ready',
+      service: 'Inventory Brew API',
+      dbConnected,
+      transactionsSupported,
     })
   }
 
@@ -59,6 +77,7 @@ app.get('/api/ready', (_req, res) => {
     status: 'ready',
     service: 'Inventory Brew API',
     dbConnected,
+    transactionsSupported,
   })
 })
 

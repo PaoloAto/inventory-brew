@@ -44,6 +44,11 @@ export const formatSignedQuantity = (
   return `${sign}${formatQuantity(Math.abs(value), unit)}`
 }
 
+export const formatSignedDelta = (value: number, unit?: string) => {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${formatQuantity(Math.abs(value), unit)}`
+}
+
 export const formatPercentage = (value: number, maximumFractionDigits = 0) =>
   `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)}%`
 

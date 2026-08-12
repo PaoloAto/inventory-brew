@@ -14,3 +14,5 @@ export const getErrorMessage = (error: unknown, fallback = 'Request failed') => 
 
   return fallback
 }
+
+export const getErrorCode = (error: unknown) => (error instanceof ApiError ? error.code : undefined)

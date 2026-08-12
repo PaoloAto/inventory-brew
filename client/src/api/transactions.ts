@@ -8,9 +8,12 @@ interface InventoryTransactionDTO {
   ingredientId: string
   type: InventoryTransactionType
   quantity: number
+  deltaQuantity?: number
   previousStock: number
   newStock: number
   reason?: string
+  reasonCode?: string
+  operationId?: string
   unitCost?: number
   referenceType?: InventoryTransactionReferenceType
   referenceId?: string
@@ -35,9 +38,12 @@ export interface InventoryTransaction {
   ingredientId: string
   type: InventoryTransactionType
   quantity: number
+  deltaQuantity?: number
   previousStock: number
   newStock: number
   reason?: string
+  reasonCode?: string
+  operationId?: string
   unitCost?: number
   referenceType?: InventoryTransactionReferenceType
   referenceId?: string
@@ -84,9 +90,12 @@ const toInventoryTransaction = (dto: InventoryTransactionDTO): InventoryTransact
   ingredientId: dto.ingredientId,
   type: dto.type,
   quantity: dto.quantity,
+  deltaQuantity: dto.deltaQuantity,
   previousStock: dto.previousStock,
   newStock: dto.newStock,
   reason: dto.reason,
+  reasonCode: dto.reasonCode,
+  operationId: dto.operationId,
   unitCost: dto.unitCost,
   referenceType: dto.referenceType,
   referenceId: dto.referenceId,
@@ -109,4 +118,3 @@ export const listTransactions = async (
     pagination: response.pagination,
   }
 }
-

@@ -1,6 +1,6 @@
 const request = require('supertest')
 const mongoose = require('mongoose')
-const { MongoMemoryServer } = require('mongodb-memory-server')
+const { MongoMemoryReplSet } = require('mongodb-memory-server')
 const app = require('../app')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
@@ -13,7 +13,12 @@ describe('Inventory Brew API integration', () => {
   let mongoServer
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create()
+    mongoServer = await MongoMemoryReplSet.create({
+      replSet: {
+        count: 1,
+        storageEngine: 'wiredTiger',
+      },
+    })
     await mongoose.connect(mongoServer.getUri(), { dbName: 'inventory-brew-test' })
   })
 
@@ -45,7 +50,7 @@ describe('Inventory Brew API integration', () => {
     expect(response.body.error.details.join(' ')).toContain('unit must be one of')
   })
 
-  test('POST /api/ingredients creates initial IN transaction when stock > 0', async () => {
+  test('POST /api/ingredients atomically creates initial IN transaction when stock > 0', async () => {
     const createResponse = await request(app).post('/api/ingredients').send({
       name: 'Carrot',
       unit: 'pcs',
@@ -60,9 +65,50 @@ describe('Inventory Brew API integration', () => {
     expect(transactions).toHaveLength(1)
     expect(transactions[0].type).toBe('IN')
     expect(transactions[0].quantity).toBe(25)
+    expect(transactions[0]).toMatchObject({
+      deltaQuantity: 25,
+      previousStock: 0,
+      newStock: 25,
+      reasonCode: 'INITIAL_STOCK',
+      referenceType: 'system',
+    })
+    expect(transactions[0].operationId).toEqual(expect.any(String))
   })
 
-  test('POST /api/ingredients/:id/adjust-stock blocks negative stock', async () => {
+  test('POST /api/ingredients with zero stock creates no initial transaction', async () => {
+    const response = await request(app).post('/api/ingredients').send({
+      name: 'Empty container',
+      unit: 'pcs',
+      stockQuantity: 0,
+      costPerUnit: 1,
+    })
+
+    expect(response.status).toBe(201)
+    expect(await InventoryTransaction.countDocuments({ ingredientId: response.body._id })).toBe(0)
+  })
+
+  test('POST /api/ingredients rolls back when initial transaction creation fails', async () => {
+    const createSpy = jest
+      .spyOn(InventoryTransaction, 'create')
+      .mockRejectedValueOnce(new Error('forced initial transaction failure'))
+
+    try {
+      const response = await request(app).post('/api/ingredients').send({
+        name: 'Rollback ingredient',
+        unit: 'pcs',
+        stockQuantity: 5,
+        costPerUnit: 1,
+      })
+
+      expect(response.status).toBe(500)
+      expect(await Ingredient.countDocuments({ name: 'Rollback ingredient' })).toBe(0)
+      expect(await InventoryTransaction.countDocuments()).toBe(0)
+    } finally {
+      createSpy.mockRestore()
+    }
+  })
+
+  test('manual IN and OUT are atomic with signed ledger deltas and insufficient OUT changes nothing', async () => {
     const createResponse = await request(app).post('/api/ingredients').send({
       name: 'Olive Oil',
       unit: 'ml',
@@ -71,16 +117,89 @@ describe('Inventory Brew API integration', () => {
       reorderLevel: 5,
     })
 
-    const adjustResponse = await request(app)
+    const receiptResponse = await request(app)
       .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
       .send({
-        type: 'OUT',
-        quantity: 999,
-        reason: 'Over-consume test',
+        type: 'IN',
+        quantity: 5,
+        reason: 'Delivery',
       })
+    expect(receiptResponse.status).toBe(200)
+    expect(receiptResponse.body.ingredient.stockQuantity).toBe(25)
+    expect(receiptResponse.body.transaction).toMatchObject({
+      type: 'IN',
+      quantity: 5,
+      deltaQuantity: 5,
+      previousStock: 20,
+      newStock: 25,
+      reasonCode: 'MANUAL_RECEIPT',
+      referenceType: 'manual',
+    })
+    expect(receiptResponse.body.operationId).toEqual(expect.any(String))
 
+    const usageResponse = await request(app)
+      .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+      .send({ type: 'OUT', quantity: 4, reason: 'Service' })
+    expect(usageResponse.status).toBe(200)
+    expect(usageResponse.body.ingredient.stockQuantity).toBe(21)
+    expect(usageResponse.body.transaction).toMatchObject({
+      type: 'OUT',
+      quantity: 4,
+      deltaQuantity: -4,
+      previousStock: 25,
+      newStock: 21,
+      reasonCode: 'MANUAL_USAGE',
+    })
+
+    const transactionCount = await InventoryTransaction.countDocuments()
+    const adjustResponse = await request(app)
+      .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+      .send({ type: 'OUT', quantity: 999, reason: 'Over-consume test' })
     expect(adjustResponse.status).toBe(400)
     expect(adjustResponse.body.error.code).toBe('INSUFFICIENT_STOCK')
+    expect((await Ingredient.findById(createResponse.body._id)).stockQuantity).toBe(21)
+    expect(await InventoryTransaction.countDocuments()).toBe(transactionCount)
+  })
+
+  test('stale ADJUST returns STOCK_CHANGED without stock or ledger changes', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Counted beans',
+      unit: 'pcs',
+      stockQuantity: 10,
+      costPerUnit: 1,
+    })
+    await request(app)
+      .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+      .send({ type: 'IN', quantity: 1 })
+    const transactionCount = await InventoryTransaction.countDocuments()
+
+    const response = await request(app)
+      .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+      .send({ type: 'ADJUST', newStockQuantity: 8, expectedCurrentStock: 10 })
+
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('STOCK_CHANGED')
+    expect((await Ingredient.findById(createResponse.body._id)).stockQuantity).toBe(11)
+    expect(await InventoryTransaction.countDocuments()).toBe(transactionCount)
+  })
+
+  test('concurrent OUT requests cannot overconsume shared stock', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Concurrent beans',
+      unit: 'pcs',
+      stockQuantity: 10,
+      costPerUnit: 1,
+    })
+
+    const responses = await Promise.all(
+      [1, 2].map(() =>
+        request(app).post(`/api/ingredients/${createResponse.body._id}/adjust-stock`).send({ type: 'OUT', quantity: 7 }),
+      ),
+    )
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 400])
+    expect((await Ingredient.findById(createResponse.body._id)).stockQuantity).toBe(3)
+    expect(await InventoryTransaction.countDocuments({ ingredientId: createResponse.body._id, type: 'OUT' })).toBe(1)
   })
 
   test('GET /api/ingredients supports healthyStockOnly filter and rejects conflicting stock filters', async () => {
@@ -377,8 +496,9 @@ describe('Inventory Brew API integration', () => {
     })
 
     expect(cookResponse.status).toBe(200)
-    expect(['fallback', 'transaction']).toContain(cookResponse.body.executionMode)
+    expect(cookResponse.body.executionMode).toBe('transaction')
     expect(cookResponse.body.transactionsCreated).toBe(2)
+    expect(cookResponse.body.operationId).toEqual(expect.any(String))
 
     const carrotAfter = await Ingredient.findById(carrotResponse.body._id).lean()
     const oilAfter = await Ingredient.findById(oilResponse.body._id).lean()
@@ -393,6 +513,43 @@ describe('Inventory Brew API integration', () => {
     }).lean()
 
     expect(outTransactions).toHaveLength(2)
+    expect(outTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ deltaQuantity: -6, reasonCode: 'RECIPE_COOK' }),
+        expect.objectContaining({ deltaQuantity: -30, reasonCode: 'RECIPE_COOK' }),
+      ]),
+    )
+    expect(new Set(outTransactions.map((transaction) => transaction.operationId))).toEqual(
+      new Set([cookResponse.body.operationId]),
+    )
+  })
+
+  test('concurrent cooks leave one complete operation and no partial consumption', async () => {
+    const [first, second] = await Promise.all(
+      ['Cook first', 'Cook second'].map((name) =>
+        request(app).post('/api/ingredients').send({ name, unit: 'pcs', stockQuantity: 2, costPerUnit: 1 }),
+      ),
+    )
+    const recipeResponse = await request(app).post('/api/recipes').send({
+      name: 'Limited cook',
+      sellingPrice: 8,
+      ingredients: [
+        { ingredientId: first.body._id, quantity: 2, unit: 'pcs' },
+        { ingredientId: second.body._id, quantity: 2, unit: 'pcs' },
+      ],
+    })
+
+    const responses = await Promise.all(
+      [1, 2].map(() => request(app).post(`/api/recipes/${recipeResponse.body._id}/cook`).send({ servings: 1 })),
+    )
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 400])
+    expect((await Ingredient.findById(first.body._id)).stockQuantity).toBe(0)
+    expect((await Ingredient.findById(second.body._id)).stockQuantity).toBe(0)
+
+    const cookTransactions = await InventoryTransaction.find({ referenceId: recipeResponse.body._id, type: 'OUT' }).lean()
+    expect(cookTransactions).toHaveLength(2)
+    expect(new Set(cookTransactions.map((transaction) => transaction.operationId)).size).toBe(1)
   })
 
   test('PATCH /api/recipes/:id/restore re-activates an archived recipe', async () => {
@@ -517,5 +674,6 @@ describe('Inventory Brew API integration', () => {
     expect(readyResponse.status).toBe(200)
     expect(readyResponse.body.status).toBe('ready')
     expect(readyResponse.body.dbConnected).toBe(true)
+    expect(readyResponse.body.transactionsSupported).toBe(true)
   })
 })

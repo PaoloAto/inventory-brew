@@ -16,14 +16,17 @@ interface IngredientDTO {
   updatedAt: string
 }
 
-interface InventoryTransactionDTO {
+export interface InventoryTransactionDTO {
   _id: string
   ingredientId: string
   type: 'IN' | 'OUT' | 'ADJUST'
   quantity: number
+  deltaQuantity?: number
   previousStock: number
   newStock: number
   reason?: string
+  reasonCode?: string
+  operationId?: string
   unitCost?: number
   referenceType?: 'recipe' | 'manual' | 'purchase' | 'system'
   referenceId?: string
@@ -83,7 +86,9 @@ export type AdjustStockPayload =
   | {
       type: 'ADJUST'
       newStockQuantity: number
+      expectedCurrentStock: number
       reason?: string
+      reasonCode?: 'PHYSICAL_COUNT' | 'MANUAL_CORRECTION'
       unitCost?: number
     }
 
@@ -158,8 +163,12 @@ export const restoreIngredient = async (id: string): Promise<Ingredient> => {
 export const adjustIngredientStock = async (
   id: string,
   payload: AdjustStockPayload,
-): Promise<{ ingredient: Ingredient; transactionId: string }> => {
-  const response = await request<{ ingredient: IngredientDTO; transaction: InventoryTransactionDTO }>(
+): Promise<{ ingredient: Ingredient; transaction: InventoryTransactionDTO; operationId: string }> => {
+  const response = await request<{
+    ingredient: IngredientDTO
+    transaction: InventoryTransactionDTO
+    operationId: string
+  }>(
     `/ingredients/${id}/adjust-stock`,
     {
       method: 'POST',
@@ -169,6 +178,7 @@ export const adjustIngredientStock = async (
 
   return {
     ingredient: toIngredient(response.ingredient),
-    transactionId: response.transaction._id,
+    transaction: response.transaction,
+    operationId: response.operationId,
   }
 }
