@@ -72,17 +72,19 @@ export const RecipeDetailsDialog = ({
             <Box
               sx={{
                 display: 'grid',
-                gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' },
+                gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, 1fr)' },
                 borderBlock: '1px solid',
                 borderColor: 'divider',
               }}
             >
               {[
-                ['Selling price', formatCurrency(details.recipe.sellingPrice)],
-                ['Ingredient cost', metrics ? formatCurrency(metrics.ingredientCost) : '—'],
-                ['Gross margin', metrics ? formatCurrency(metrics.grossMargin) : '—'],
+                ['Yield', `${details.recipe.yieldServings ?? 1} servings`],
+                ['Batch cost', metrics ? formatCurrency(metrics.batchCost) : '—'],
+                ['Cost / serving', metrics ? formatCurrency(metrics.costPerServing) : '—'],
+                ['Selling price / serving', formatCurrency(details.recipe.sellingPrice)],
+                ['Gross margin / serving', metrics ? formatCurrency(metrics.grossMargin) : '—'],
                 [
-                  'Margin',
+                  'Margin %',
                   metrics?.marginPercent === null || metrics?.marginPercent === undefined
                     ? '—'
                     : formatPercentage(metrics.marginPercent),
@@ -95,9 +97,9 @@ export const RecipeDetailsDialog = ({
                     py: 1.5,
                     borderLeft: {
                       xs: index % 2 === 0 ? 0 : '1px solid',
-                      sm: index === 0 ? 0 : '1px solid',
+                      sm: index % 3 === 0 ? 0 : '1px solid',
                     },
-                    borderTop: { xs: index > 1 ? '1px solid' : 0, sm: 0 },
+                    borderTop: { xs: index > 1 ? '1px solid' : 0, sm: index > 2 ? '1px solid' : 0 },
                     borderColor: 'divider',
                   }}
                 >
@@ -113,7 +115,7 @@ export const RecipeDetailsDialog = ({
 
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Formula per serving
+                Ingredient quantities for this batch
               </Typography>
               <Box sx={{ overflowX: 'auto', border: '1px solid', borderColor: 'divider' }}>
                 <Table size="small">
@@ -142,10 +144,10 @@ export const RecipeDetailsDialog = ({
                     ))}
                     <TableRow>
                       <TableCell colSpan={3} sx={{ fontWeight: 500 }}>
-                        Total ingredient cost
+                        Total batch cost
                       </TableCell>
                       <TableCell align="right" sx={{ ...numericSx, fontWeight: 500 }}>
-                        {metrics ? formatCurrency(metrics.ingredientCost) : '—'}
+                        {metrics ? formatCurrency(metrics.batchCost) : '—'}
                       </TableCell>
                     </TableRow>
                   </TableBody>

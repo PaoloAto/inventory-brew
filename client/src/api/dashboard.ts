@@ -31,6 +31,7 @@ export interface RecentTransaction {
   ingredientId: string
   type: 'IN' | 'OUT' | 'ADJUST'
   quantity: number
+  deltaQuantity?: number
   previousStock: number
   newStock: number
   reason?: string

@@ -4,7 +4,17 @@ const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
 const { calculateRecipeMetrics } = require('../services/recipeMetricsService')
-const { consumeStockBatchInSession, createOperationId } = require('../services/inventoryService')
+const {
+  areUnitsCompatible,
+  convertToBase,
+  convertFromBase,
+  getBaseUnit,
+} = require('../domain/units')
+const {
+  consumeStockBatchInSession,
+  createOperationId,
+  isTransactionUnsupportedError,
+} = require('../services/inventoryService')
 
 const router = express.Router()
 
@@ -13,8 +23,15 @@ const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
 const ALLOWED_UNITS = ['pcs', 'g', 'kg', 'ml', 'l']
 const ALLOWED_SORT_FIELDS = ['name', 'sellingPrice', 'createdAt', 'updatedAt']
-const CREATE_ALLOWED_FIELDS = new Set(['name', 'description', 'sellingPrice', 'ingredients', 'isActive'])
-const UPDATE_ALLOWED_FIELDS = new Set(['name', 'description', 'sellingPrice', 'ingredients'])
+const CREATE_ALLOWED_FIELDS = new Set([
+  'name',
+  'description',
+  'sellingPrice',
+  'yieldServings',
+  'ingredients',
+  'isActive',
+])
+const UPDATE_ALLOWED_FIELDS = new Set(['name', 'description', 'sellingPrice', 'yieldServings', 'ingredients'])
 
 const sendError = (res, status, code, message, details) => {
   const error = { code, message }
@@ -193,6 +210,15 @@ const validateRecipePayload = ({ payload, isCreate }) => {
     if (sellingPrice !== undefined) value.sellingPrice = sellingPrice
   }
 
+  if (isCreate || payload.yieldServings !== undefined) {
+    const yieldServings = Number(payload.yieldServings ?? 1)
+    if (!Number.isFinite(yieldServings) || !Number.isInteger(yieldServings) || yieldServings < 1) {
+      details.push('yieldServings must be a positive integer')
+    } else {
+      value.yieldServings = yieldServings
+    }
+  }
+
   if (isCreate || payload.ingredients !== undefined) {
     const ingredientLines = normalizeIngredientLines(payload.ingredients, details)
     if (ingredientLines.length > 0) value.ingredients = ingredientLines
@@ -213,7 +239,9 @@ const validateIngredientReferences = async (ingredientLines) => {
   const details = []
 
   const ingredientIds = ingredientLines.map((line) => line.ingredientId)
-  const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select('name unit isActive costPerUnit')
+  const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
+    'name unit baseUnit isActive costPerUnit averageCostPerBaseUnit',
+  )
 
   const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
 
@@ -230,12 +258,25 @@ const validateIngredientReferences = async (ingredientLines) => {
       return
     }
 
-    if (ingredient.unit !== line.unit) {
-      details.push(`Unit mismatch for ingredient "${ingredient.name}": expected ${ingredient.unit}, got ${line.unit}`)
+    if (!areUnitsCompatible(ingredient.unit, line.unit)) {
+      details.push(
+        `Unit mismatch for ingredient "${ingredient.name}": ${ingredient.unit} is not compatible with ${line.unit}`,
+      )
     }
   })
 
-  return { details, ingredientMap }
+  const lines =
+    details.length === 0
+      ? ingredientLines.map((line) => ({
+          ingredientId: line.ingredientId,
+          quantity: line.quantity,
+          unit: line.unit,
+          quantityBase: convertToBase(line.quantity, line.unit),
+          baseUnit: getBaseUnit(line.unit),
+        }))
+      : []
+
+  return { details, ingredientMap, lines }
 }
 
 const buildCookPlan = ({ recipe, ingredients, servings }) => {
@@ -257,14 +298,15 @@ const buildCookPlan = ({ recipe, ingredients, servings }) => {
         return
       }
 
-      existing.requiredQuantity = Number((existing.requiredQuantity + line.quantity * servings).toFixed(4))
+      existing.requiredQuantityBase += (line.quantityBase * servings) / recipe.yieldServings
       return
     }
 
     mergedLines.set(ingredientId, {
       ingredientId: line.ingredientId,
       unit: line.unit,
-      requiredQuantity: Number((line.quantity * servings).toFixed(4)),
+      baseUnit: line.baseUnit,
+      requiredQuantityBase: (line.quantityBase * servings) / recipe.yieldServings,
     })
   })
 
@@ -281,24 +323,27 @@ const buildCookPlan = ({ recipe, ingredients, servings }) => {
       return null
     }
 
-    if (ingredient.unit !== line.unit) {
+    if (!areUnitsCompatible(ingredient.unit, line.unit) || ingredient.baseUnit !== line.baseUnit) {
       configurationErrors.push(
         `Unit mismatch for ingredient "${ingredient.name}": recipe uses ${line.unit}, ingredient unit is ${ingredient.unit}`,
       )
       return null
     }
 
-    if (ingredient.stockQuantity < line.requiredQuantity) {
+    const requiredQuantity = convertFromBase(line.requiredQuantityBase, ingredient.unit)
+    if (ingredient.stockQuantityBase < line.requiredQuantityBase) {
       insufficientErrors.push(
-        `${ingredient.name}: needed ${line.requiredQuantity} ${line.unit}, available ${ingredient.stockQuantity} ${line.unit}`,
+        `${ingredient.name}: needed ${requiredQuantity} ${ingredient.unit}, available ${ingredient.stockQuantity} ${ingredient.unit}`,
       )
     }
 
     return {
       ingredientId: ingredient._id,
       ingredientName: ingredient.name,
-      unit: line.unit,
-      requiredQuantity: line.requiredQuantity,
+      displayUnit: ingredient.unit,
+      baseUnit: ingredient.baseUnit,
+      requiredQuantity,
+      requiredQuantityBase: line.requiredQuantityBase,
       availableQuantity: ingredient.stockQuantity,
       costPerUnit: ingredient.costPerUnit,
       ingredientDoc: ingredient,
@@ -310,15 +355,6 @@ const buildCookPlan = ({ recipe, ingredients, servings }) => {
     insufficientErrors,
     requirements: requirements.filter(Boolean),
   }
-}
-
-const isTransactionUnsupportedError = (error) => {
-  const message = String(error?.message || '').toLowerCase()
-  return (
-    message.includes('transaction numbers are only allowed on a replica set member or mongos') ||
-    message.includes('transaction support is not available') ||
-    message.includes('does not support transactions')
-  )
 }
 
 const executeCookWithTransaction = async ({ recipeId, servings }) => {
@@ -343,7 +379,9 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
 
       const ingredientIds = [...new Set(recipe.ingredients.map((line) => String(line.ingredientId)))]
       const ingredients = await Ingredient.find({ _id: { $in: ingredientIds } })
-        .select('name unit isActive stockQuantity costPerUnit')
+        .select(
+          'name unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit',
+        )
         .session(session)
 
       const plan = buildCookPlan({ recipe, ingredients, servings })
@@ -371,8 +409,10 @@ const executeCookWithTransaction = async ({ recipeId, servings }) => {
         movements: plan.requirements.map((requirement) => ({
           ingredientId: requirement.ingredientId,
           ingredientName: requirement.ingredientName,
-          unit: requirement.unit,
+          displayUnit: requirement.displayUnit,
+          baseUnit: requirement.baseUnit,
           quantity: requirement.requiredQuantity,
+          quantityBase: requirement.requiredQuantityBase,
           costPerUnit: requirement.costPerUnit,
         })),
         reason,
@@ -412,7 +452,9 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
   }
 
   const ingredientIds = [...new Set(recipe.ingredients.map((line) => String(line.ingredientId)))]
-  const ingredients = await Ingredient.find({ _id: { $in: ingredientIds } }).select('name unit isActive stockQuantity costPerUnit')
+  const ingredients = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
+    'name unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit',
+  )
 
   const plan = buildCookPlan({ recipe, ingredients, servings })
   if (plan.configurationErrors.length > 0) {
@@ -441,12 +483,18 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
         {
           _id: requirement.ingredientId,
           isActive: true,
-          unit: requirement.unit,
-          stockQuantity: { $gte: requirement.requiredQuantity },
+          unit: requirement.displayUnit,
+          baseUnit: requirement.baseUnit,
+          stockQuantityBase: { $gte: requirement.requiredQuantityBase },
         },
-        { $inc: { stockQuantity: -requirement.requiredQuantity } },
+        {
+          $inc: {
+            stockQuantity: -requirement.requiredQuantity,
+            stockQuantityBase: -requirement.requiredQuantityBase,
+          },
+        },
         { new: false },
-      ).select('name stockQuantity costPerUnit')
+      ).select('name stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit')
 
       if (!previous) {
         throw createAppError(
@@ -463,8 +511,9 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
       applied.push({
         ingredientId: previous._id,
         ingredientName: previous.name,
-        unit: requirement.unit,
+        unit: requirement.displayUnit,
         requiredQuantity: requirement.requiredQuantity,
+        requiredQuantityBase: requirement.requiredQuantityBase,
         previousStock,
         newStock,
         costPerUnit: previous.costPerUnit,
@@ -500,7 +549,17 @@ const executeCookWithoutTransaction = async ({ recipeId, servings }) => {
   } catch (error) {
     if (applied.length > 0) {
       await Promise.allSettled(
-        applied.map((entry) => Ingredient.updateOne({ _id: entry.ingredientId }, { $inc: { stockQuantity: entry.requiredQuantity } })),
+          applied.map((entry) =>
+            Ingredient.updateOne(
+              { _id: entry.ingredientId },
+              {
+                $inc: {
+                  stockQuantity: entry.requiredQuantity,
+                  stockQuantityBase: entry.requiredQuantityBase,
+                },
+              },
+            ),
+          ),
       )
     }
 
@@ -544,7 +603,7 @@ router.get('/', async (req, res) => {
     if (includeComputed && items.length > 0) {
       const ingredientIds = [...new Set(items.flatMap((recipe) => recipe.ingredients.map((line) => String(line.ingredientId))))]
       const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
-        'name unit isActive costPerUnit',
+        'name unit baseUnit isActive costPerUnit averageCostPerBaseUnit',
       )
       const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
 
@@ -583,6 +642,17 @@ router.patch('/:id/restore', async (req, res) => {
 
     if (recipe.isActive) {
       return res.json({ message: 'Recipe is already active', recipe })
+    }
+
+    const ingredientCheck = await validateIngredientReferences(recipe.ingredients)
+    if (ingredientCheck.details.length > 0) {
+      return sendError(
+        res,
+        409,
+        'INVALID_RECIPE_CONFIGURATION',
+        'Recipe cannot be restored due to ingredient configuration issues',
+        ingredientCheck.details,
+      )
     }
 
     recipe.isActive = true
@@ -665,7 +735,9 @@ router.get('/:id', async (req, res) => {
     }
 
     const ingredientIds = recipe.ingredients.map((line) => line.ingredientId)
-    const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select('name unit costPerUnit isActive')
+    const ingredientDocs = await Ingredient.find({ _id: { $in: ingredientIds } }).select(
+      'name unit baseUnit costPerUnit averageCostPerBaseUnit isActive',
+    )
     const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
 
     const ingredientDetails = recipe.ingredients.map((line) => {
@@ -679,7 +751,9 @@ router.get('/:id', async (req, res) => {
         quantity: line.quantity,
         unit: line.unit,
         costPerUnit,
-        costContribution: ingredient ? Number((line.quantity * ingredient.costPerUnit).toFixed(4)) : null,
+        costContribution: ingredient
+          ? Number((line.quantityBase * ingredient.averageCostPerBaseUnit).toFixed(4))
+          : null,
       }
     })
 
@@ -713,7 +787,7 @@ router.post('/', async (req, res) => {
       return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid recipe payload', ingredientCheck.details)
     }
 
-    const recipe = new Recipe(value)
+    const recipe = new Recipe({ ...value, ingredients: ingredientCheck.lines })
     const saved = await recipe.save()
 
     return res.status(201).json(saved)
@@ -738,6 +812,7 @@ router.put('/:id', async (req, res) => {
       if (ingredientCheck.details.length > 0) {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid recipe payload', ingredientCheck.details)
       }
+      value.ingredients = ingredientCheck.lines
     }
 
     const recipe = await Recipe.findById(req.params.id)

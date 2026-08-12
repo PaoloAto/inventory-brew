@@ -2,8 +2,14 @@ const express = require('express')
 const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
+const Recipe = require('../models/Recipe')
 const { calculateStockStatus } = require('../domain/stockStatus')
-const { createIngredientWithInitialStock, adjustIngredientStock } = require('../services/inventoryService')
+const { convertToBase, costPerDisplayUnitToBase } = require('../domain/units')
+const {
+  createIngredientWithInitialStock,
+  adjustIngredientStock,
+  isTransactionUnsupportedError,
+} = require('../services/inventoryService')
 
 const router = express.Router()
 
@@ -241,7 +247,7 @@ const validateAdjustPayload = (payload) => {
   }
 
   let reasonCode
-  if (payload.reasonCode !== undefined) {
+  if (payload.reasonCode !== undefined && ADJUST_REASON_CODES[type]) {
     reasonCode = typeof payload.reasonCode === 'string' ? payload.reasonCode.trim() : ''
     if (!ADJUST_REASON_CODES[type]?.includes(reasonCode)) {
       details.push(`reasonCode must be one of: ${ADJUST_REASON_CODES[type].join(', ')}`)
@@ -277,6 +283,18 @@ const ensureValidIngredientId = (res, id) => {
   }
   return true
 }
+
+const findActiveRecipeDependencies = (ingredientId) =>
+  Recipe.find({ isActive: true, 'ingredients.ingredientId': ingredientId }).select('name').lean()
+
+const sendIngredientInUse = (res, dependentRecipes) =>
+  sendError(
+    res,
+    409,
+    'INGREDIENT_IN_USE',
+    'Ingredient is used by active recipes and cannot be archived',
+    dependentRecipes.map((recipe) => ({ id: String(recipe._id), name: recipe.name })),
+  )
 
 // GET /api/ingredients - list ingredients with search/filter/sort/pagination
 router.get('/', async (req, res) => {
@@ -398,6 +416,14 @@ router.post('/:id/adjust-stock', async (req, res) => {
     if (err?.isAppError) {
       return sendError(res, err.status, err.code, err.message, err.details)
     }
+    if (isTransactionUnsupportedError(err)) {
+      return sendError(
+        res,
+        503,
+        'TRANSACTIONS_UNAVAILABLE',
+        'Inventory operations require MongoDB transaction support.',
+      )
+    }
     console.error('Error adjusting stock:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to adjust stock')
   }
@@ -495,6 +521,14 @@ router.post('/', async (req, res) => {
 
     res.status(201).json(normalizeIngredient(saved))
   } catch (err) {
+    if (isTransactionUnsupportedError(err)) {
+      return sendError(
+        res,
+        503,
+        'TRANSACTIONS_UNAVAILABLE',
+        'Inventory operations require MongoDB transaction support.',
+      )
+    }
     console.error('Error creating ingredient:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to create ingredient')
   }
@@ -520,14 +554,30 @@ router.put('/:id', async (req, res) => {
       return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', details)
     }
 
+    const existing = await Ingredient.findById(req.params.id)
+    if (!existing) {
+      return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
+    }
+
+    if (value.unit !== undefined && value.unit !== existing.unit) {
+      return sendError(res, 409, 'UNIT_CHANGE_NOT_ALLOWED', 'Ingredient unit cannot be changed after creation')
+    }
+
+    if (value.reorderLevel !== undefined) {
+      value.reorderLevelBase = convertToBase(value.reorderLevel, existing.unit)
+    }
+    if (value.costPerUnit !== undefined) {
+      value.averageCostPerBaseUnit = costPerDisplayUnitToBase(value.costPerUnit, existing.unit)
+    }
+    if (value.isActive === false && existing.isActive) {
+      const dependentRecipes = await findActiveRecipeDependencies(existing._id)
+      if (dependentRecipes.length > 0) return sendIngredientInUse(res, dependentRecipes)
+    }
+
     const updated = await Ingredient.findByIdAndUpdate(req.params.id, value, {
       new: true,
       runValidators: true,
     })
-
-    if (!updated) {
-      return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
-    }
 
     res.json(normalizeIngredient(updated))
   } catch (err) {
@@ -548,6 +598,11 @@ router.delete('/:id', async (req, res) => {
 
     if (!ingredient.isActive) {
       return res.json({ message: 'Ingredient already inactive', ingredient: normalizeIngredient(ingredient) })
+    }
+
+    const dependentRecipes = await findActiveRecipeDependencies(ingredient._id)
+    if (dependentRecipes.length > 0) {
+      return sendIngredientInUse(res, dependentRecipes)
     }
 
     ingredient.isActive = false

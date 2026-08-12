@@ -2,8 +2,24 @@ const crypto = require('crypto')
 const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
+const {
+  convertToBase,
+  getBaseUnit,
+  getConversionFactor,
+  costPerDisplayUnitToBase,
+  costPerBaseUnitToDisplay,
+} = require('../domain/units')
 
 const createOperationId = () => crypto.randomUUID()
+
+const isTransactionUnsupportedError = (error) => {
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    message.includes('transaction numbers are only allowed on a replica set member or mongos') ||
+    message.includes('transaction support is not available') ||
+    message.includes('does not support transactions')
+  )
+}
 
 const createAppError = (status, code, message, details) => {
   const error = new Error(message)
@@ -15,7 +31,9 @@ const createAppError = (status, code, message, details) => {
 }
 
 const getUnavailableIngredientError = async ({ ingredientId, session, type }) => {
-  const ingredient = await Ingredient.findById(ingredientId).select('isActive stockQuantity').session(session)
+  const ingredient = await Ingredient.findById(ingredientId)
+    .select('isActive stockQuantity stockQuantityBase')
+    .session(session)
 
   if (!ingredient) return createAppError(404, 'NOT_FOUND', 'Ingredient not found')
   if (!ingredient.isActive) {
@@ -36,7 +54,17 @@ const createIngredientWithInitialStock = async ({ ingredientData }) => {
 
   try {
     await session.withTransaction(async () => {
-      const [ingredient] = await Ingredient.create([ingredientData], { session })
+      const canonicalData = {
+        ...ingredientData,
+        baseUnit: getBaseUnit(ingredientData.unit),
+        stockQuantityBase: convertToBase(ingredientData.stockQuantity, ingredientData.unit),
+        reorderLevelBase: convertToBase(ingredientData.reorderLevel, ingredientData.unit),
+        averageCostPerBaseUnit: costPerDisplayUnitToBase(
+          ingredientData.costPerUnit,
+          ingredientData.unit,
+        ),
+      }
+      const [ingredient] = await Ingredient.create([canonicalData], { session })
       let transaction = null
 
       if (ingredient.stockQuantity > 0 && ingredient.isActive) {
@@ -69,31 +97,95 @@ const createIngredientWithInitialStock = async ({ ingredientData }) => {
   }
 }
 
-const adjustIngredientStock = async ({ ingredientId, type, quantity, newStockQuantity, expectedCurrentStock, reason, reasonCode, unitCost }) => {
+const adjustIngredientStock = async ({
+  ingredientId,
+  type,
+  quantity,
+  newStockQuantity,
+  expectedCurrentStock,
+  reason,
+  reasonCode,
+  unitCost,
+}) => {
   const session = await mongoose.startSession()
   const operationId = createOperationId()
   let result
 
   try {
     await session.withTransaction(async () => {
-      const filter = { _id: ingredientId, isActive: true }
+      const current = await Ingredient.findById(ingredientId)
+        .select(
+          'unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit',
+        )
+        .session(session)
+      if (!current || !current.isActive) {
+        throw await getUnavailableIngredientError({ ingredientId, session, type })
+      }
+
+      const factor = getConversionFactor(current.unit)
+      const expectedBaseUnit = getBaseUnit(current.unit)
+      const currentStockBase =
+        current.stockQuantityBase ?? convertToBase(current.stockQuantity, current.unit)
+      const currentAverageBase =
+        current.averageCostPerBaseUnit ?? costPerDisplayUnitToBase(current.costPerUnit, current.unit)
+      const filter = { _id: ingredientId, isActive: true, unit: current.unit, baseUnit: expectedBaseUnit }
       let update
       let defaultReasonCode
 
       if (type === 'IN') {
-        update = { $inc: { stockQuantity: quantity } }
+        const quantityBase = convertToBase(quantity, current.unit)
+        if (unitCost === undefined) {
+          update = {
+            $inc: { stockQuantity: quantity, stockQuantityBase: quantityBase },
+          }
+        } else {
+          const receiptCostBase = costPerDisplayUnitToBase(unitCost, current.unit)
+          const newAverageExpression = {
+            $divide: [
+              {
+                $add: [
+                  { $multiply: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, currentAverageBase] },
+                  quantityBase * receiptCostBase,
+                ],
+              },
+              { $add: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, quantityBase] },
+            ],
+          }
+          update = [
+            {
+              $set: {
+                stockQuantity: { $add: ['$stockQuantity', quantity] },
+                stockQuantityBase: {
+                  $add: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, quantityBase],
+                },
+                averageCostPerBaseUnit: newAverageExpression,
+              },
+            },
+            { $set: { costPerUnit: { $multiply: ['$averageCostPerBaseUnit', factor] } } },
+          ]
+        }
         defaultReasonCode = 'MANUAL_RECEIPT'
       } else if (type === 'OUT') {
-        filter.stockQuantity = { $gte: quantity }
-        update = { $inc: { stockQuantity: -quantity } }
+        const quantityBase = convertToBase(quantity, current.unit)
+        filter.stockQuantityBase = { $gte: quantityBase }
+        update = { $inc: { stockQuantity: -quantity, stockQuantityBase: -quantityBase } }
         defaultReasonCode = 'MANUAL_USAGE'
       } else {
         filter.stockQuantity = expectedCurrentStock
-        update = { $set: { stockQuantity: newStockQuantity } }
+        update = {
+          $set: {
+            stockQuantity: newStockQuantity,
+            stockQuantityBase: convertToBase(newStockQuantity, current.unit),
+          },
+        }
         defaultReasonCode = 'PHYSICAL_COUNT'
       }
 
-      const previous = await Ingredient.findOneAndUpdate(filter, update, { new: false, session })
+      const previous = await Ingredient.findOneAndUpdate(filter, update, {
+        new: false,
+        session,
+        updatePipeline: Array.isArray(update),
+      })
       if (!previous) {
         throw await getUnavailableIngredientError({ ingredientId, session, type })
       }
@@ -147,12 +239,18 @@ const consumeStockBatchInSession = async ({
       {
         _id: movement.ingredientId,
         isActive: true,
-        unit: movement.unit,
-        stockQuantity: { $gte: movement.quantity },
+        unit: movement.displayUnit,
+        baseUnit: movement.baseUnit,
+        stockQuantityBase: { $gte: movement.quantityBase },
       },
-      { $inc: { stockQuantity: -movement.quantity } },
+      {
+        $inc: {
+          stockQuantity: -movement.quantity,
+          stockQuantityBase: -movement.quantityBase,
+        },
+      },
       { new: false, session },
-    ).select('name stockQuantity costPerUnit')
+    ).select('name stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit')
 
     if (!previous) {
       throw createAppError(
@@ -168,11 +266,14 @@ const consumeStockBatchInSession = async ({
     consumption.push({
       ingredientId: previous._id,
       ingredientName: previous.name,
-      unit: movement.unit,
+      unit: movement.displayUnit,
       requiredQuantity: movement.quantity,
+      requiredQuantityBase: movement.quantityBase,
       previousStock,
       newStock,
-      costPerUnit: movement.costPerUnit ?? previous.costPerUnit,
+      costPerUnit:
+        movement.costPerUnit ??
+        costPerBaseUnitToDisplay(previous.averageCostPerBaseUnit, movement.displayUnit),
     })
   }
 
@@ -202,4 +303,5 @@ module.exports = {
   createIngredientWithInitialStock,
   adjustIngredientStock,
   consumeStockBatchInSession,
+  isTransactionUnsupportedError,
 }

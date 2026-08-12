@@ -16,7 +16,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import type { Recipe, RecipeIngredient } from '../../types/recipe'
 import type { Ingredient, Unit } from '../../types/ingredient'
 
-type RecipeInput = Omit<Recipe, 'id' | 'isActive'> & { id?: string; isActive?: boolean }
+type RecipeInput = Omit<Recipe, 'id' | 'isActive' | 'yieldServings'> & {
+  id?: string
+  isActive?: boolean
+  yieldServings: number
+}
 
 interface RecipeDialogProps {
   open: boolean
@@ -33,7 +37,7 @@ const createBlankIngredient = (): RecipeIngredient => ({ ingredientId: '', quant
 
 const getInitialValues = (initialData?: Recipe | null): RecipeInput => {
   if (initialData) {
-    return { ...initialData }
+    return { ...initialData, yieldServings: initialData.yieldServings ?? 1 }
   }
 
   return {
@@ -41,6 +45,7 @@ const getInitialValues = (initialData?: Recipe | null): RecipeInput => {
     name: '',
     description: '',
     sellingPrice: 0,
+    yieldServings: 1,
     ingredients: [createBlankIngredient()],
     isActive: true,
   }
@@ -89,6 +94,9 @@ export const RecipeDialog = ({
     const nextErrors: Record<string, string> = {}
     if (!values.name.trim()) nextErrors.name = 'Name is required'
     if (values.sellingPrice < 0) nextErrors.sellingPrice = 'Must be non-negative'
+    if (!Number.isInteger(values.yieldServings) || values.yieldServings < 1) {
+      nextErrors.yieldServings = 'Must be a positive whole number'
+    }
     values.ingredients.forEach((ri, idx) => {
       if (!ri.ingredientId.trim()) nextErrors[`ingredientId-${idx}`] = 'Ingredient required'
       if (ri.quantity <= 0) nextErrors[`quantity-${idx}`] = 'Quantity must be > 0'
@@ -115,7 +123,7 @@ export const RecipeDialog = ({
       <DialogTitle>{mode} recipe</DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
-          <Grid size={{ xs: 12, sm: 8 }}>
+          <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               label="Name"
               value={values.name}
@@ -125,16 +133,28 @@ export const RecipeDialog = ({
               helperText={errors.name}
             />
           </Grid>
-          <Grid size={{ xs: 12, sm: 4 }}>
+          <Grid size={{ xs: 6, sm: 3 }}>
             <TextField
               type="number"
-              label="Selling price"
+              label="Selling price / serving"
               value={values.sellingPrice}
               onChange={(e) => handleChange('sellingPrice', Number(e.target.value))}
               fullWidth
               error={Boolean(errors.sellingPrice)}
               helperText={errors.sellingPrice}
               inputProps={{ min: 0, step: 0.01 }}
+            />
+          </Grid>
+          <Grid size={{ xs: 6, sm: 3 }}>
+            <TextField
+              type="number"
+              label="Batch yield"
+              value={values.yieldServings}
+              onChange={(e) => handleChange('yieldServings', Number(e.target.value))}
+              fullWidth
+              error={Boolean(errors.yieldServings)}
+              helperText={errors.yieldServings || 'Servings produced'}
+              inputProps={{ min: 1, step: 1 }}
             />
           </Grid>
           <Grid size={12}>
@@ -150,7 +170,7 @@ export const RecipeDialog = ({
         </Grid>
 
         <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>
-          Ingredients per serving
+          Ingredient quantities for this batch
         </Typography>
         <Grid container spacing={1.5}>
           {values.ingredients.map((ri, idx) => (

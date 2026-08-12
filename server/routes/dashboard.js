@@ -99,7 +99,9 @@ router.get('/summary', async (req, res) => {
 
     const [ingredients, recipeCount, recentTransactionsRaw] = await Promise.all([
       Ingredient.find(ingredientMatch)
-        .select('name unit stockQuantity costPerUnit reorderLevel isActive')
+        .select(
+          'name unit stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit reorderLevel isActive',
+        )
         .lean(),
       Recipe.countDocuments(recipeMatch),
       InventoryTransaction.find().sort({ createdAt: -1 }).limit(recentTransactionsLimit).lean(),
@@ -134,7 +136,7 @@ router.get('/summary', async (req, res) => {
       return {
         ...ingredient,
         stockStatus,
-        stockValue: ingredient.stockQuantity * ingredient.costPerUnit,
+        stockValue: ingredient.stockQuantityBase * ingredient.averageCostPerBaseUnit,
       }
     })
 

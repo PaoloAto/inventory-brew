@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const { getBaseUnit, convertToBase } = require('../domain/units')
 
 const recipeIngredientSchema = new mongoose.Schema(
   {
@@ -16,6 +17,14 @@ const recipeIngredientSchema = new mongoose.Schema(
       type: String,
       required: true,
       enum: ['pcs', 'g', 'kg', 'ml', 'l'],
+    },
+    quantityBase: {
+      type: Number,
+      min: 0,
+    },
+    baseUnit: {
+      type: String,
+      enum: ['pcs', 'g', 'ml'],
     },
   },
   { _id: false },
@@ -39,6 +48,15 @@ const recipeSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    yieldServings: {
+      type: Number,
+      default: 1,
+      min: 1,
+      validate: {
+        validator: Number.isInteger,
+        message: 'yieldServings must be an integer',
+      },
+    },
     ingredients: {
       type: [recipeIngredientSchema],
       default: [],
@@ -57,6 +75,14 @@ const recipeSchema = new mongoose.Schema(
     timestamps: true,
   },
 )
+
+recipeSchema.pre('validate', function populateCanonicalRecipeFields() {
+  for (const line of this.ingredients || []) {
+    if (!line.unit) continue
+    if (line.baseUnit === undefined) line.baseUnit = getBaseUnit(line.unit)
+    if (line.quantityBase === undefined) line.quantityBase = convertToBase(line.quantity, line.unit)
+  }
+})
 
 recipeSchema.index({ name: 1 })
 recipeSchema.index({ isActive: 1, name: 1 })

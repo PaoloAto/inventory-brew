@@ -15,7 +15,7 @@ import {
 import { getDashboardSummary, type DashboardSummaryResponse } from '../../api/dashboard'
 import { getErrorMessage } from '../../api/error'
 import { AttentionRail } from '../../components/ui/AttentionRail'
-import { formatCurrency, formatDateTime, formatQuantity, formatSignedQuantity, formatTime } from '../../components/ui/formatters'
+import { formatCurrency, formatDateTime, formatQuantity, formatSignedDelta, formatTime } from '../../components/ui/formatters'
 import { LedgerEmptyState } from '../../components/ui/LedgerEmptyState'
 import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
 import { LedgerSection } from '../../components/ui/LedgerSection'
@@ -211,6 +211,7 @@ export const DashboardPage = () => {
                   {recentTransactions.map((transaction) => {
                     const unit = transaction.ingredient?.unit
                     const reference = transaction.reference?.name
+                    const delta = transaction.deltaQuantity ?? transaction.newStock - transaction.previousStock
                     return (
                       <TableRow key={transaction._id} hover>
                         <TableCell sx={{ minWidth: 145, fontWeight: 500 }}>
@@ -242,7 +243,7 @@ export const DashboardPage = () => {
                                 fontSize: '0.8125rem',
                               }}
                             >
-                              {formatSignedQuantity(transaction.quantity, transaction.type, unit)}
+                              {formatSignedDelta(delta, unit)}
                             </Typography>
                           </Stack>
                         </TableCell>

@@ -60,7 +60,7 @@ export const RecipeRow = ({
       )}
       {isVisible('costPerServing') && (
         <TableCell align="right" sx={numericSx}>
-          {metrics ? formatCurrency(metrics.ingredientCost) : '—'}
+          {metrics ? formatCurrency(metrics.costPerServing) : '—'}
         </TableCell>
       )}
 

@@ -6,6 +6,15 @@ const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
 const { calculateStockStatus } = require('../domain/stockStatus')
+const {
+  getBaseUnit,
+  convertToBase,
+  convertFromBase,
+  areUnitsCompatible,
+  costPerDisplayUnitToBase,
+  costPerBaseUnitToDisplay,
+} = require('../domain/units')
+const { runMigration } = require('../scripts/migrateCanonicalUnitsAndYield')
 
 jest.setTimeout(120000)
 
@@ -161,6 +170,331 @@ describe('Inventory Brew API integration', () => {
     expect(await InventoryTransaction.countDocuments()).toBe(transactionCount)
   })
 
+  test('invalid movement type with reasonCode returns validation error', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Validation beans',
+      unit: 'pcs',
+      stockQuantity: 2,
+      costPerUnit: 1,
+    })
+
+    const response = await request(app)
+      .post(`/api/ingredients/${ingredient._id}/adjust-stock`)
+      .send({ type: 'INVALID', reasonCode: 'WHATEVER' })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  test('manual ledger failure rolls stock back and successful ADJUST records signed delta', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Atomic adjustment',
+      unit: 'pcs',
+      stockQuantity: 10,
+      costPerUnit: 1,
+    })
+    const transactionCount = await InventoryTransaction.countDocuments()
+    const createSpy = jest
+      .spyOn(InventoryTransaction, 'create')
+      .mockRejectedValueOnce(new Error('forced manual transaction failure'))
+
+    try {
+      const failed = await request(app)
+        .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+        .send({ type: 'IN', quantity: 5, unitCost: 2 })
+
+      expect(failed.status).toBe(500)
+      expect(await Ingredient.findById(createResponse.body._id).lean()).toMatchObject({
+        stockQuantity: 10,
+        stockQuantityBase: 10,
+        costPerUnit: 1,
+        averageCostPerBaseUnit: 1,
+      })
+      expect(await InventoryTransaction.countDocuments()).toBe(transactionCount)
+    } finally {
+      createSpy.mockRestore()
+    }
+
+    const adjusted = await request(app)
+      .post(`/api/ingredients/${createResponse.body._id}/adjust-stock`)
+      .send({ type: 'ADJUST', newStockQuantity: 7, expectedCurrentStock: 10 })
+
+    expect(adjusted.status).toBe(200)
+    expect(adjusted.body.transaction).toMatchObject({
+      quantity: 3,
+      deltaQuantity: -3,
+      previousStock: 10,
+      newStock: 7,
+      reasonCode: 'PHYSICAL_COUNT',
+    })
+  })
+
+  test('canonical unit helpers convert compatible units and reject incompatible dimensions', () => {
+    expect(getBaseUnit('kg')).toBe('g')
+    expect(convertToBase(2.5, 'kg')).toBe(2500)
+    expect(convertFromBase(2500, 'kg')).toBe(2.5)
+    expect(convertToBase(1.5, 'l')).toBe(1500)
+    expect(areUnitsCompatible('kg', 'g')).toBe(true)
+    expect(areUnitsCompatible('l', 'ml')).toBe(true)
+    expect(areUnitsCompatible('kg', 'ml')).toBe(false)
+    expect(costPerDisplayUnitToBase(120, 'kg')).toBe(0.12)
+    expect(costPerBaseUnitToDisplay(0.12, 'kg')).toBe(120)
+    expect(() => convertToBase(1, 'box')).toThrow('Unknown unit')
+  })
+
+  test('transaction-unavailable handling is consistent for ingredient creation and adjustment', async () => {
+    const ingredient = await Ingredient.create({
+      name: 'Transaction capability fixture',
+      unit: 'pcs',
+      stockQuantity: 2,
+      costPerUnit: 1,
+    })
+    const unsupported = new Error('Transaction numbers are only allowed on a replica set member or mongos')
+    const sessionSpy = jest.spyOn(mongoose, 'startSession').mockRejectedValue(unsupported)
+
+    try {
+      const createResponse = await request(app).post('/api/ingredients').send({
+        name: 'Unsupported create',
+        unit: 'pcs',
+        stockQuantity: 1,
+        costPerUnit: 1,
+      })
+      const adjustResponse = await request(app)
+        .post(`/api/ingredients/${ingredient._id}/adjust-stock`)
+        .send({ type: 'IN', quantity: 1, unitCost: 1 })
+
+      for (const response of [createResponse, adjustResponse]) {
+        expect(response.status).toBe(503)
+        expect(response.body.error).toMatchObject({
+          code: 'TRANSACTIONS_UNAVAILABLE',
+          message: 'Inventory operations require MongoDB transaction support.',
+        })
+      }
+    } finally {
+      sessionSpy.mockRestore()
+    }
+  })
+
+  test('ingredient unit changes are blocked and active recipe dependencies protect archive and restore', async () => {
+    const ingredientResponse = await request(app).post('/api/ingredients').send({
+      name: 'Protected flour',
+      unit: 'kg',
+      stockQuantity: 2,
+      costPerUnit: 100,
+    })
+    const sameUnit = await request(app)
+      .put(`/api/ingredients/${ingredientResponse.body._id}`)
+      .send({ unit: 'kg' })
+    expect(sameUnit.status).toBe(200)
+
+    const changedUnit = await request(app)
+      .put(`/api/ingredients/${ingredientResponse.body._id}`)
+      .send({ unit: 'g' })
+    expect(changedUnit.status).toBe(409)
+    expect(changedUnit.body.error.code).toBe('UNIT_CHANGE_NOT_ALLOWED')
+
+    const recipeResponse = await request(app).post('/api/recipes').send({
+      name: 'Protected recipe',
+      sellingPrice: 10,
+      yieldServings: 2,
+      ingredients: [{ ingredientId: ingredientResponse.body._id, quantity: 1, unit: 'kg' }],
+    })
+    const blockedArchive = await request(app).delete(`/api/ingredients/${ingredientResponse.body._id}`)
+    expect(blockedArchive.status).toBe(409)
+    expect(blockedArchive.body.error.code).toBe('INGREDIENT_IN_USE')
+    expect(blockedArchive.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Protected recipe' })]),
+    )
+    const blockedPutArchive = await request(app)
+      .put(`/api/ingredients/${ingredientResponse.body._id}`)
+      .send({ isActive: false })
+    expect(blockedPutArchive.status).toBe(409)
+    expect(blockedPutArchive.body.error.code).toBe('INGREDIENT_IN_USE')
+
+    await request(app).delete(`/api/recipes/${recipeResponse.body._id}`)
+    expect((await request(app).delete(`/api/ingredients/${ingredientResponse.body._id}`)).status).toBe(200)
+    const invalidRestore = await request(app).patch(`/api/recipes/${recipeResponse.body._id}/restore`)
+    expect(invalidRestore.status).toBe(409)
+    expect(invalidRestore.body.error.code).toBe('INVALID_RECIPE_CONFIGURATION')
+  })
+
+  test('weighted receipts handle zero stock, preserve average without price, and canonicalize kg/l', async () => {
+    const kgResponse = await request(app).post('/api/ingredients').send({
+      name: 'Zero stock flour',
+      unit: 'kg',
+      stockQuantity: 0,
+      costPerUnit: 100,
+      reorderLevel: 0.5,
+    })
+    expect(kgResponse.body).toMatchObject({
+      baseUnit: 'g',
+      stockQuantityBase: 0,
+      reorderLevelBase: 500,
+      averageCostPerBaseUnit: 0.1,
+    })
+
+    const pricedReceipt = await request(app)
+      .post(`/api/ingredients/${kgResponse.body._id}/adjust-stock`)
+      .send({ type: 'IN', quantity: 5, unitCost: 160 })
+    expect(pricedReceipt.status).toBe(200)
+    expect(pricedReceipt.body.ingredient).toMatchObject({
+      stockQuantity: 5,
+      stockQuantityBase: 5000,
+      costPerUnit: 160,
+      averageCostPerBaseUnit: 0.16,
+    })
+
+    const unpricedReceipt = await request(app)
+      .post(`/api/ingredients/${kgResponse.body._id}/adjust-stock`)
+      .send({ type: 'IN', quantity: 1 })
+    expect(unpricedReceipt.status).toBe(200)
+    expect(unpricedReceipt.body.ingredient).toMatchObject({
+      stockQuantity: 6,
+      stockQuantityBase: 6000,
+      costPerUnit: 160,
+      averageCostPerBaseUnit: 0.16,
+    })
+
+    const liters = await request(app).post('/api/ingredients').send({
+      name: 'Syrup',
+      unit: 'l',
+      stockQuantity: 2,
+      costPerUnit: 30,
+      reorderLevel: 0.25,
+    })
+    expect(liters.body).toMatchObject({
+      baseUnit: 'ml',
+      stockQuantityBase: 2000,
+      reorderLevelBase: 250,
+      averageCostPerBaseUnit: 0.03,
+    })
+  })
+
+  test('weighted average flows through canonical valuation, recipe yield metrics, and cooking', async () => {
+    const ingredientResponse = await request(app).post('/api/ingredients').send({
+      name: 'Audit fixture flour',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 100,
+    })
+    const receipt = await request(app)
+      .post(`/api/ingredients/${ingredientResponse.body._id}/adjust-stock`)
+      .send({ type: 'IN', quantity: 5, unitCost: 160 })
+    expect(receipt.status).toBe(200)
+    expect(receipt.body.ingredient).toMatchObject({
+      stockQuantity: 15,
+      stockQuantityBase: 15000,
+      costPerUnit: 120,
+      averageCostPerBaseUnit: 0.12,
+    })
+
+    const recipeResponse = await request(app).post('/api/recipes').send({
+      name: 'Yield fixture',
+      sellingPrice: 100,
+      yieldServings: 4,
+      ingredients: [{ ingredientId: ingredientResponse.body._id, quantity: 2, unit: 'kg' }],
+    })
+    expect(recipeResponse.status).toBe(201)
+    expect(recipeResponse.body.ingredients[0]).toMatchObject({
+      quantity: 2,
+      unit: 'kg',
+      quantityBase: 2000,
+      baseUnit: 'g',
+    })
+
+    const details = await request(app).get(`/api/recipes/${recipeResponse.body._id}`)
+    expect(details.body.computed).toEqual({
+      batchCost: 240,
+      ingredientCost: 240,
+      costPerServing: 60,
+      grossMargin: 40,
+      margin: 40,
+      marginPercent: 40,
+    })
+    const dashboard = await request(app).get('/api/dashboard/summary')
+    expect(dashboard.body.summary.totalStockValue).toBe(1800)
+
+    const cooked = await request(app)
+      .post(`/api/recipes/${recipeResponse.body._id}/cook`)
+      .send({ servings: 2 })
+    expect(cooked.status).toBe(200)
+    expect(cooked.body.executionMode).toBe('transaction')
+    expect(cooked.body.consumption[0]).toMatchObject({
+      unit: 'kg',
+      requiredQuantity: 1,
+      requiredQuantityBase: 1000,
+    })
+    const finalIngredient = await Ingredient.findById(ingredientResponse.body._id).lean()
+    expect(finalIngredient).toMatchObject({
+      stockQuantity: 14,
+      stockQuantityBase: 14000,
+      costPerUnit: 120,
+      averageCostPerBaseUnit: 0.12,
+    })
+  })
+
+  test('migration dry-run is additive and apply/verify preserve valuation while setting yield', async () => {
+    const ingredientId = new mongoose.Types.ObjectId()
+    await Ingredient.collection.insertOne({
+      _id: ingredientId,
+      name: 'Legacy kilograms',
+      unit: 'kg',
+      stockQuantity: 2,
+      reorderLevel: 0.5,
+      costPerUnit: 240,
+      isActive: true,
+    })
+    await Recipe.collection.insertOne({
+      _id: new mongoose.Types.ObjectId(),
+      name: 'Legacy recipe',
+      sellingPrice: 100,
+      ingredients: [{ ingredientId, quantity: 0.5, unit: 'kg' }],
+      isActive: true,
+    })
+
+    const dryRun = await runMigration('dry-run')
+    expect(dryRun).toMatchObject({
+      ingredientsNeedingUpdate: 1,
+      recipesNeedingUpdate: 1,
+      displayValue: 480,
+      canonicalValue: 480,
+      invalid: [],
+    })
+    expect((await Ingredient.collection.findOne({ _id: ingredientId })).stockQuantityBase).toBeUndefined()
+
+    const applied = await runMigration('apply')
+    expect(applied.after.ok).toBe(true)
+    const verify = await runMigration('verify')
+    expect(verify.ok).toBe(true)
+    expect(verify.valuationDifference).toBeCloseTo(0, 10)
+    const migratedIngredient = await Ingredient.collection.findOne({ _id: ingredientId })
+    expect(migratedIngredient).toMatchObject({
+      baseUnit: 'g',
+      stockQuantityBase: 2000,
+      reorderLevelBase: 500,
+      averageCostPerBaseUnit: 0.24,
+    })
+    const migratedRecipe = await Recipe.collection.findOne({ name: 'Legacy recipe' })
+    expect(migratedRecipe.yieldServings).toBe(1)
+    expect(migratedRecipe.ingredients[0]).toMatchObject({ quantityBase: 500, baseUnit: 'g' })
+
+    const rerun = await runMigration('apply')
+    expect(rerun.after.ok).toBe(true)
+    expect(rerun.before.ingredientsNeedingUpdate).toBe(0)
+    expect(rerun.before.recipesNeedingUpdate).toBe(0)
+
+    await Ingredient.collection.insertOne({
+      _id: new mongoose.Types.ObjectId(),
+      name: 'Unknown legacy unit',
+      unit: 'box',
+      stockQuantity: 1,
+      reorderLevel: 0,
+      costPerUnit: 1,
+      isActive: true,
+    })
+    await expect(runMigration('apply')).rejects.toThrow('Migration refused')
+  })
+
   test('stale ADJUST returns STOCK_CHANGED without stock or ledger changes', async () => {
     const createResponse = await request(app).post('/api/ingredients').send({
       name: 'Counted beans',
@@ -271,6 +605,7 @@ describe('Inventory Brew API integration', () => {
     expect(listResponse.status).toBe(200)
     expect(detailsResponse.status).toBe(200)
     expect(listResponse.body.items[0].computed).toEqual({
+      batchCost: 3,
       ingredientCost: 3,
       costPerServing: 3,
       grossMargin: 2,

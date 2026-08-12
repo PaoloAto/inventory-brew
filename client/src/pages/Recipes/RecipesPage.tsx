@@ -50,7 +50,7 @@ const recipeColumnOptions: Array<TableColumnOption<RecipeColumnKey>> = [
   { key: 'name', label: 'Recipe', locked: true },
   { key: 'description', label: 'Description' },
   { key: 'sellingPrice', label: 'Selling price' },
-  { key: 'costPerServing', label: 'Ingredient cost' },
+  { key: 'costPerServing', label: 'Cost / serving' },
   { key: 'margin', label: 'Gross margin' },
   { key: 'marginPercent', label: 'Margin %' },
   { key: 'ingredientCount', label: 'Ingredients' },
@@ -197,6 +197,7 @@ export const RecipesPage = () => {
           name: input.name,
           description: input.description,
           sellingPrice: input.sellingPrice,
+          yieldServings: input.yieldServings ?? 1,
           ingredients: input.ingredients,
         })
         showSnackbar('Recipe updated', { severity: 'success' })
@@ -205,6 +206,7 @@ export const RecipesPage = () => {
           name: input.name,
           description: input.description,
           sellingPrice: input.sellingPrice,
+          yieldServings: input.yieldServings ?? 1,
           ingredients: input.ingredients,
           isActive: true,
         })

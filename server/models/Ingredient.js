@@ -1,4 +1,9 @@
 const mongoose = require('mongoose')
+const {
+  getBaseUnit,
+  convertToBase,
+  costPerDisplayUnitToBase,
+} = require('../domain/units')
 
 const ingredientSchema = new mongoose.Schema(
   {
@@ -26,15 +31,31 @@ const ingredientSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    baseUnit: {
+      type: String,
+      enum: ['pcs', 'g', 'ml'],
+    },
+    stockQuantityBase: {
+      type: Number,
+      min: 0,
+    },
     costPerUnit: {
       type: Number,
       required: true,
       default: 0,
       min: 0,
     },
+    averageCostPerBaseUnit: {
+      type: Number,
+      min: 0,
+    },
     reorderLevel: {
       type: Number,
       default: 0,
+      min: 0,
+    },
+    reorderLevelBase: {
+      type: Number,
       min: 0,
     },
     isActive: {
@@ -47,6 +68,20 @@ const ingredientSchema = new mongoose.Schema(
     timestamps: true,
   },
 )
+
+ingredientSchema.pre('validate', function populateCanonicalIngredientFields() {
+  if (!this.unit) return
+  if (this.baseUnit === undefined) this.baseUnit = getBaseUnit(this.unit)
+  if (this.stockQuantityBase === undefined) {
+    this.stockQuantityBase = convertToBase(this.stockQuantity, this.unit)
+  }
+  if (this.reorderLevelBase === undefined) {
+    this.reorderLevelBase = convertToBase(this.reorderLevel, this.unit)
+  }
+  if (this.averageCostPerBaseUnit === undefined) {
+    this.averageCostPerBaseUnit = costPerDisplayUnitToBase(this.costPerUnit, this.unit)
+  }
+})
 
 ingredientSchema.index({ isActive: 1, name: 1 })
 ingredientSchema.index({ isActive: 1, category: 1 })

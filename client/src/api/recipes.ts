@@ -10,6 +10,8 @@ interface RecipeIngredientDTO {
   ingredientId: string
   quantity: number
   unit: Unit
+  quantityBase?: number
+  baseUnit?: 'pcs' | 'g' | 'ml'
 }
 
 interface RecipeDTO {
@@ -17,6 +19,7 @@ interface RecipeDTO {
   name: string
   description?: string
   sellingPrice: number
+  yieldServings: number
   ingredients: RecipeIngredientDTO[]
   computed?: RecipeComputedMetrics | null
   configuration?: RecipeConfiguration
@@ -58,6 +61,7 @@ export interface RecipeWritePayload {
   name: string
   description?: string
   sellingPrice: number
+  yieldServings: number
   ingredients: Array<{
     ingredientId: string
     quantity: number
@@ -70,6 +74,7 @@ export interface RecipeUpdatePayload {
   name?: string
   description?: string
   sellingPrice?: number
+  yieldServings?: number
   ingredients?: Array<{
     ingredientId: string
     quantity: number
@@ -102,10 +107,13 @@ const toRecipe = (dto: RecipeDTO): Recipe => ({
   name: dto.name,
   description: dto.description,
   sellingPrice: dto.sellingPrice,
+  yieldServings: dto.yieldServings ?? 1,
   ingredients: dto.ingredients.map((line) => ({
     ingredientId: line.ingredientId,
     quantity: line.quantity,
     unit: line.unit,
+    quantityBase: line.quantityBase,
+    baseUnit: line.baseUnit,
   })),
   computed: dto.computed,
   configuration: dto.configuration,

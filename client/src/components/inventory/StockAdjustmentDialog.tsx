@@ -35,12 +35,14 @@ export const StockAdjustmentDialog = ({
 }: StockAdjustmentDialogProps) => {
   const [type, setType] = useState<AdjustmentType>('IN')
   const [amount, setAmount] = useState(1)
+  const [unitCost, setUnitCost] = useState(0)
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
 
   const reset = () => {
     setType('IN')
     setAmount(1)
+    setUnitCost(ingredient?.costPerUnit ?? 0)
     setReason('')
     setError('')
   }
@@ -53,6 +55,10 @@ export const StockAdjustmentDialog = ({
     }
     if (type !== 'ADJUST' && amount <= 0) {
       setError('Quantity must be greater than zero.')
+      return
+    }
+    if (type === 'IN' && (!Number.isFinite(unitCost) || unitCost < 0)) {
+      setError('Unit cost must be a non-negative number.')
       return
     }
     if (type === 'OUT' && amount > ingredient.stockQuantity) {
@@ -69,7 +75,12 @@ export const StockAdjustmentDialog = ({
             expectedCurrentStock: ingredient.stockQuantity,
             reason: trimmedReason,
           }
-        : { type, quantity: amount, reason: trimmedReason },
+        : {
+            type,
+            quantity: amount,
+            reason: trimmedReason,
+            ...(type === 'IN' ? { unitCost } : {}),
+          },
     )
   }
 
@@ -116,7 +127,7 @@ export const StockAdjustmentDialog = ({
             <TextField
               autoFocus
               type="number"
-              label={type === 'ADJUST' ? 'New stock quantity' : 'Quantity'}
+              label={type === 'ADJUST' ? 'New stock quantity' : type === 'IN' ? 'Quantity received' : 'Quantity'}
               value={amount}
               onChange={(event) => {
                 setAmount(Number(event.target.value))
@@ -126,6 +137,21 @@ export const StockAdjustmentDialog = ({
               inputProps={{ min: type === 'ADJUST' ? 0 : 0.01, step: 0.01 }}
               helperText={`Unit: ${ingredient.unit}`}
             />
+
+            {type === 'IN' ? (
+              <TextField
+                type="number"
+                label={`Unit cost / ${ingredient.unit}`}
+                value={unitCost}
+                onChange={(event) => {
+                  setUnitCost(Number(event.target.value))
+                  setError('')
+                }}
+                fullWidth
+                inputProps={{ min: 0, step: 0.01 }}
+                helperText={`Current average: ${unitCost === ingredient.costPerUnit ? '' : 'previously '}${ingredient.costPerUnit.toFixed(2)} / ${ingredient.unit}`}
+              />
+            ) : null}
 
             {type === 'ADJUST' ? (
               <Stack spacing={0.5} sx={{ px: 0.25 }}>

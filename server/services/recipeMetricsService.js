@@ -1,13 +1,16 @@
+const { areUnitsCompatible } = require('../domain/units')
+
 const roundTo = (value, decimalPlaces) => Number(value.toFixed(decimalPlaces))
 
 const calculateRecipeMetrics = (recipe, ingredientMap) => {
   const issues = []
-  let ingredientCost = 0
+  let batchCost = 0
 
   for (const line of recipe.ingredients || []) {
     const ingredientId = String(line.ingredientId)
     const ingredient = ingredientMap.get(ingredientId)
     const quantity = Number(line.quantity)
+    const quantityBase = Number(line.quantityBase)
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
       issues.push({
@@ -36,7 +39,7 @@ const calculateRecipeMetrics = (recipe, ingredientMap) => {
       })
     }
 
-    if (ingredient.unit !== line.unit) {
+    if (!areUnitsCompatible(ingredient.unit, line.unit)) {
       issues.push({
         code: 'UNIT_MISMATCH',
         ingredientId,
@@ -45,8 +48,22 @@ const calculateRecipeMetrics = (recipe, ingredientMap) => {
       })
     }
 
-    if (Number.isFinite(quantity) && quantity > 0) {
-      ingredientCost += quantity * ingredient.costPerUnit
+    if (!Number.isFinite(quantityBase) || quantityBase <= 0) {
+      issues.push({
+        code: 'INVALID_QUANTITY',
+        ingredientId,
+        ingredientName: ingredient.name,
+        message: `Canonical ingredient quantity is missing or invalid for "${ingredient.name}"`,
+      })
+    } else if (!Number.isFinite(ingredient.averageCostPerBaseUnit)) {
+      issues.push({
+        code: 'INVALID_COST',
+        ingredientId,
+        ingredientName: ingredient.name,
+        message: `Canonical ingredient cost is missing or invalid for "${ingredient.name}"`,
+      })
+    } else {
+      batchCost += quantityBase * ingredient.averageCostPerBaseUnit
     }
   }
 
@@ -63,13 +80,31 @@ const calculateRecipeMetrics = (recipe, ingredientMap) => {
   }
 
   const sellingPrice = Number(recipe.sellingPrice)
-  const grossMargin = sellingPrice - ingredientCost
+  const yieldServings = Number(recipe.yieldServings)
+  if (!Number.isInteger(yieldServings) || yieldServings < 1) {
+    return {
+      computed: null,
+      configuration: {
+        isValid: false,
+        issues: [
+          ...issues,
+          {
+            code: 'INVALID_YIELD',
+            message: 'Recipe batch yield must be a positive integer',
+          },
+        ],
+      },
+    }
+  }
+  const costPerServing = batchCost / yieldServings
+  const grossMargin = sellingPrice - costPerServing
   const roundedGrossMargin = roundTo(grossMargin, 4)
 
   return {
     computed: {
-      ingredientCost: roundTo(ingredientCost, 4),
-      costPerServing: roundTo(ingredientCost, 4),
+      batchCost: roundTo(batchCost, 4),
+      ingredientCost: roundTo(batchCost, 4),
+      costPerServing: roundTo(costPerServing, 4),
       grossMargin: roundedGrossMargin,
       // Temporary compatibility alias for clients using the previous field name.
       margin: roundedGrossMargin,

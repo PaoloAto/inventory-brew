@@ -8,6 +8,9 @@
     "start": "node index.js",
     "seed": "node scripts/seed.js",
     "seed:dry": "node scripts/seed.js --dry-run",
+    "migrate:canonical:dry": "node scripts/migrateCanonicalUnitsAndYield.js --dry-run",
+    "migrate:canonical": "node scripts/migrateCanonicalUnitsAndYield.js --apply",
+    "migrate:canonical:verify": "node scripts/migrateCanonicalUnitsAndYield.js --verify",
     "test": "jest --runInBand --detectOpenHandles",
     "test:watch": "jest --watch"
   },
