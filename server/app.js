@@ -7,6 +7,7 @@ const recipeRoutes = require('./routes/recipes')
 const transactionRoutes = require('./routes/transactions')
 const dashboardRoutes = require('./routes/dashboard')
 const productionRoutes = require('./routes/production')
+const wasteRoutes = require('./routes/waste')
 const Ingredient = require('./models/Ingredient')
 const Recipe = require('./models/Recipe')
 
@@ -140,6 +141,7 @@ app.use('/api/recipes', recipeRoutes)
 app.use('/api/transactions', transactionRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/production', productionRoutes)
+app.use('/api/waste', wasteRoutes)
 
 app.use('/api', (_req, res) => {
   res.status(404).json({

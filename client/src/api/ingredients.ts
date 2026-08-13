@@ -1,7 +1,7 @@
 import type { Ingredient, StockStatus, Unit } from '../types/ingredient'
 import { request, type PaginatedResponse } from './http'
 
-interface IngredientDTO {
+export interface IngredientDTO {
   _id: string
   name: string
   manufacturer?: string
@@ -92,7 +92,7 @@ export type AdjustStockPayload =
       unitCost?: number
     }
 
-const toIngredient = (dto: IngredientDTO): Ingredient => ({
+export const toIngredient = (dto: IngredientDTO): Ingredient => ({
   id: dto._id,
   name: dto.name,
   manufacturer: dto.manufacturer,

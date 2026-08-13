@@ -23,6 +23,7 @@ interface IngredientTableProps {
   onToggleSelectAll: (checked: boolean) => void
   onEdit: (ingredient: Ingredient) => void
   onAdjustStock: (ingredient: Ingredient) => void
+  onRecordWaste: (ingredient: Ingredient) => void
   sortBy: IngredientSortField
   sortOrder: SortOrder
   onRequestSort: (field: IngredientSortField) => void
@@ -37,6 +38,7 @@ export const IngredientTable = ({
   onToggleSelectAll,
   onEdit,
   onAdjustStock,
+  onRecordWaste,
   sortBy,
   sortOrder,
   onRequestSort,
@@ -131,6 +133,7 @@ export const IngredientTable = ({
               onSelect={onToggleSelect}
               onEdit={onEdit}
               onAdjustStock={onAdjustStock}
+              onRecordWaste={onRecordWaste}
             />
           ))
         )}

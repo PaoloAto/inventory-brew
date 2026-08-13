@@ -24,6 +24,7 @@ import {
   type AdjustStockPayload,
 } from '../../api/ingredients'
 import { getErrorCode, getErrorMessage } from '../../api/error'
+import { recordWaste, type RecordWastePayload } from '../../api/waste'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
 import {
   IngredientTable,
@@ -32,6 +33,7 @@ import {
   type SortOrder,
 } from '../../components/inventory/IngredientTable'
 import { StockAdjustmentDialog } from '../../components/inventory/StockAdjustmentDialog'
+import { RecordWasteDialog } from '../../components/inventory/RecordWasteDialog'
 import { DataToolbar } from '../../components/ui/DataToolbar'
 import { LedgerPageHeader } from '../../components/ui/LedgerPageHeader'
 import { LedgerTableContainer } from '../../components/ui/LedgerTableContainer'
@@ -100,6 +102,7 @@ export const IngredientsPage = () => {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Ingredient | null>(null)
   const [adjusting, setAdjusting] = useState<Ingredient | null>(null)
+  const [wasting, setWasting] = useState<Ingredient | null>(null)
   const [stockFilter, setStockFilter] = useState<StockFilter>(parseStockFilter(searchParams.get('stock')))
   const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') ?? 'all')
   const [sortBy, setSortBy] = useState<IngredientSortField>(parseSortField(searchParams.get('sortBy')))
@@ -303,6 +306,25 @@ export const IngredientsPage = () => {
     }
   }
 
+  const handleRecordWaste = async (payload: RecordWastePayload) => {
+    if (!wasting) return
+    setIsSaving(true)
+    try {
+      const result = await recordWaste(wasting.id, payload)
+      showSnackbar(`${payload.quantity} ${wasting.unit} waste recorded`, { severity: 'success' })
+      setWasting(null)
+      await loadIngredients()
+      return result
+    } catch (error) {
+      if (getErrorCode(error) === 'INSUFFICIENT_STOCK') {
+        await loadIngredients()
+      }
+      showSnackbar(getErrorMessage(error, 'Failed to record waste'), { severity: 'error' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <Box>
       <LedgerPageHeader
@@ -396,6 +418,7 @@ export const IngredientsPage = () => {
               setDialogOpen(true)
             }}
             onAdjustStock={setAdjusting}
+            onRecordWaste={setWasting}
             sortBy={sortBy}
             sortOrder={sortOrder}
             onRequestSort={handleRequestSort}
@@ -463,6 +486,15 @@ export const IngredientsPage = () => {
         onClose={() => setAdjusting(null)}
         onConfirm={(payload) => void handleAdjustStock(payload)}
       />
+      {wasting ? (
+        <RecordWasteDialog
+          open
+          ingredient={wasting}
+          saving={isSaving}
+          onClose={() => setWasting(null)}
+          onConfirm={(payload) => void handleRecordWaste(payload)}
+        />
+      ) : null}
     </Box>
   )
 }

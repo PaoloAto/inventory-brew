@@ -205,7 +205,10 @@ const adjustIngredientStock = async ({
             newStock,
             reason,
             reasonCode: reasonCode || defaultReasonCode,
-            unitCost: type === 'IN' ? (unitCost ?? previous.costPerUnit) : unitCost,
+            unitCost:
+              type === 'IN' || type === 'OUT'
+                ? (unitCost ?? previous.costPerUnit)
+                : unitCost,
             referenceType: 'manual',
             operationId,
           },

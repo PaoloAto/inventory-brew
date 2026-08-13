@@ -43,6 +43,21 @@ const ADJUST_REASON_CODES = {
   OUT: ['MANUAL_USAGE'],
   ADJUST: ['PHYSICAL_COUNT', 'MANUAL_CORRECTION'],
 }
+const WASTE_REASON_CODES = [
+  'WASTE_SPOILAGE',
+  'WASTE_EXPIRED',
+  'WASTE_PREP',
+  'WASTE_DAMAGE',
+  'WASTE_OTHER',
+]
+const WASTE_ALLOWED_FIELDS = new Set(['quantity', 'reasonCode', 'note'])
+const WASTE_REASON_LABELS = {
+  WASTE_SPOILAGE: 'Spoilage',
+  WASTE_EXPIRED: 'Expired',
+  WASTE_PREP: 'Prep waste',
+  WASTE_DAMAGE: 'Damage',
+  WASTE_OTHER: 'Other',
+}
 
 const normalizeIngredient = (ingredient) => {
   const normalized = typeof ingredient.toObject === 'function' ? ingredient.toObject() : ingredient
@@ -276,6 +291,25 @@ const validateAdjustPayload = (payload) => {
   }
 }
 
+const validateWastePayload = (payload) => {
+  const details = []
+  const unknownFields = getUnknownFields(payload, WASTE_ALLOWED_FIELDS)
+  if (unknownFields.length > 0) details.push(`Unknown field(s): ${unknownFields.join(', ')}`)
+
+  const quantity = Number(payload.quantity)
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    details.push('quantity must be a positive number')
+  }
+
+  const reasonCode = typeof payload.reasonCode === 'string' ? payload.reasonCode.trim() : ''
+  if (!WASTE_REASON_CODES.includes(reasonCode)) {
+    details.push(`reasonCode must be one of: ${WASTE_REASON_CODES.join(', ')}`)
+  }
+
+  const note = normalizeOptionalString(payload.note, 'note', details)
+  return { details, value: { quantity, reasonCode, note } }
+}
+
 const ensureValidIngredientId = (res, id) => {
   if (!mongoose.isValidObjectId(id)) {
     sendError(res, 400, 'INVALID_ID', 'Invalid ingredient id')
@@ -426,6 +460,49 @@ router.post('/:id/adjust-stock', async (req, res) => {
     }
     console.error('Error adjusting stock:', err)
     sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to adjust stock')
+  }
+})
+
+// POST /api/ingredients/:id/waste - record a structured inventory loss
+router.post('/:id/waste', async (req, res) => {
+  try {
+    if (!ensureValidIngredientId(res, req.params.id)) return
+
+    const { details, value } = validateWastePayload(req.body || {})
+    if (details.length > 0) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid waste payload', details)
+    }
+
+    const { ingredient, transaction, operationId } = await adjustIngredientStock({
+      ingredientId: req.params.id,
+      type: 'OUT',
+      quantity: value.quantity,
+      reasonCode: value.reasonCode,
+      reason: value.note || `Waste: ${WASTE_REASON_LABELS[value.reasonCode]}`,
+    })
+    const lossValue = transaction.quantity * transaction.unitCost
+
+    return res.json({
+      message: 'Waste recorded',
+      ingredient: normalizeIngredient(ingredient),
+      transaction,
+      operationId,
+      lossValue,
+    })
+  } catch (err) {
+    if (err?.isAppError) {
+      return sendError(res, err.status, err.code, err.message, err.details)
+    }
+    if (isTransactionUnsupportedError(err)) {
+      return sendError(
+        res,
+        503,
+        'TRANSACTIONS_UNAVAILABLE',
+        'Inventory operations require MongoDB transaction support.',
+      )
+    }
+    console.error('Error recording waste:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to record waste')
   }
 })
 

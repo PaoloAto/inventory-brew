@@ -32,6 +32,11 @@ const inventoryTransactionSchema = new mongoose.Schema(
         'PHYSICAL_COUNT',
         'MANUAL_CORRECTION',
         'RECIPE_COOK',
+        'WASTE_SPOILAGE',
+        'WASTE_EXPIRED',
+        'WASTE_PREP',
+        'WASTE_DAMAGE',
+        'WASTE_OTHER',
       ],
     },
     previousStock: {

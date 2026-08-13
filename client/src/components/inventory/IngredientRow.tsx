@@ -1,5 +1,6 @@
 import EditIcon from '@mui/icons-material/Edit'
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
+import DeleteSweepOutlinedIcon from '@mui/icons-material/DeleteSweepOutlined'
 import { Checkbox, Stack, TableCell, TableRow, Typography } from '@mui/material'
 import { RowActionMenu } from '../ui/RowActionMenu'
 import { StatusLabel } from '../ui/StatusLabel'
@@ -16,6 +17,7 @@ interface IngredientRowProps {
   onSelect: (id: string, checked: boolean) => void
   onEdit: (ingredient: Ingredient) => void
   onAdjustStock: (ingredient: Ingredient) => void
+  onRecordWaste: (ingredient: Ingredient) => void
 }
 
 export const IngredientRow = ({
@@ -25,6 +27,7 @@ export const IngredientRow = ({
   onSelect,
   onEdit,
   onAdjustStock,
+  onRecordWaste,
 }: IngredientRowProps) => {
   const totalValue = ingredient.stockQuantity * ingredient.costPerUnit
   const isVisible = (column: IngredientColumnKey) => visibleColumns.includes(column)
@@ -89,6 +92,16 @@ export const IngredientRow = ({
           <RowActionMenu
             tooltip={`Actions for ${ingredient.name}`}
             actions={[
+              ...(ingredient.isActive
+                ? [
+                    {
+                      key: 'waste',
+                      label: 'Record waste',
+                      icon: <DeleteSweepOutlinedIcon fontSize="small" />,
+                      onClick: () => onRecordWaste(ingredient),
+                    },
+                  ]
+                : []),
               {
                 key: 'adjust',
                 label: 'Adjust stock',

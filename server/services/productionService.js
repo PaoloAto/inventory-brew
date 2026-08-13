@@ -1,7 +1,5 @@
 const { areUnitsCompatible, convertFromBase, getBaseUnit } = require('../domain/units')
 
-const FLOOR_EPSILON = 1e-9
-
 const buildProductionPlan = ({ recipe, ingredients, servings }) => {
   const configurationErrors = []
   const ingredientMap = new Map(ingredients.map((ingredient) => [String(ingredient._id), ingredient]))
@@ -98,10 +96,7 @@ const calculateMaxCookableServings = ({ recipe, requirements }) => {
     0,
     Math.min(
       ...requirements.map((item) =>
-        Math.floor(
-          (item.availableQuantityBase * recipe.yieldServings) / item.quantityBasePerBatch +
-            FLOOR_EPSILON,
-        ),
+        Math.floor((item.availableQuantityBase * recipe.yieldServings) / item.quantityBasePerBatch),
       ),
     ),
   )

@@ -1153,7 +1153,7 @@ describe('Inventory Brew API integration', () => {
       .post(`/api/recipes/${fixture.recipeId}/cook-preview`)
       .send({ servings: 1 })
     expect(preview.status).toBe(200)
-    expect(preview.body).toMatchObject({ canCook: false })
+    expect(preview.body).toMatchObject({ canCook: false, maxCookableServings: 0 })
     expect(preview.body.requirements[0]).toMatchObject({
       requiredQuantityBase: 500,
       availableQuantityBase: 500 - 1e-10,
@@ -1165,6 +1165,134 @@ describe('Inventory Brew API integration', () => {
       .send({ servings: 1, idempotencyKey: '77777777-7777-4777-8777-777777777777' })
     expect(cook.status).toBe(400)
     expect(cook.body.error.code).toBe('INSUFFICIENT_STOCK')
+  })
+
+  test('recording waste atomically snapshots weighted-average cost and preserves historical valuation', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Chicken breast',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 180,
+    })
+    const ingredientId = createResponse.body._id
+    const waste = await request(app)
+      .post(`/api/ingredients/${ingredientId}/waste`)
+      .send({ quantity: 1.5, reasonCode: 'WASTE_SPOILAGE', note: 'Walk-in refrigerator issue' })
+
+    expect(waste.status).toBe(200)
+    expect(waste.body).toMatchObject({ message: 'Waste recorded', lossValue: 270 })
+    expect(waste.body.ingredient).toMatchObject({ stockQuantity: 8.5, stockQuantityBase: 8500 })
+    expect(waste.body.transaction).toMatchObject({
+      type: 'OUT',
+      quantity: 1.5,
+      deltaQuantity: -1.5,
+      previousStock: 10,
+      newStock: 8.5,
+      unitCost: 180,
+      reasonCode: 'WASTE_SPOILAGE',
+    })
+
+    await request(app).put(`/api/ingredients/${ingredientId}`).send({ costPerUnit: 220 })
+    const history = await request(app).get('/api/waste').query({ ingredientId })
+    expect(history.status).toBe(200)
+    expect(history.body.items[0]).toMatchObject({
+      ingredientId,
+      ingredientName: 'Chicken breast',
+      unit: 'kg',
+      quantity: 1.5,
+      unitCost: 180,
+      lossValue: 270,
+      reasonCode: 'WASTE_SPOILAGE',
+      note: 'Walk-in refrigerator issue',
+    })
+  })
+
+  test('waste validation and insufficient stock leave inventory and the waste ledger unchanged', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Waste validation chicken',
+      unit: 'kg',
+      stockQuantity: 1,
+      costPerUnit: 50,
+    })
+    const ingredientId = createResponse.body._id
+    const beforeWasteCount = await InventoryTransaction.countDocuments({
+      type: 'OUT',
+      reasonCode: { $in: ['WASTE_SPOILAGE', 'WASTE_EXPIRED', 'WASTE_PREP', 'WASTE_DAMAGE', 'WASTE_OTHER'] },
+    })
+
+    const invalid = await request(app)
+      .post(`/api/ingredients/${ingredientId}/waste`)
+      .send({ quantity: 0.5, reasonCode: 'MANUAL_USAGE' })
+    expect(invalid.status).toBe(400)
+    expect(invalid.body.error.code).toBe('VALIDATION_ERROR')
+
+    const insufficient = await request(app)
+      .post(`/api/ingredients/${ingredientId}/waste`)
+      .send({ quantity: 2, reasonCode: 'WASTE_DAMAGE' })
+    expect(insufficient.status).toBe(400)
+    expect(insufficient.body.error.code).toBe('INSUFFICIENT_STOCK')
+    expect((await Ingredient.findById(ingredientId)).stockQuantity).toBe(1)
+    expect(
+      await InventoryTransaction.countDocuments({
+        type: 'OUT',
+        reasonCode: { $in: ['WASTE_SPOILAGE', 'WASTE_EXPIRED', 'WASTE_PREP', 'WASTE_DAMAGE', 'WASTE_OTHER'] },
+      }),
+    ).toBe(beforeWasteCount)
+  })
+
+  test('waste history filters ledger entries and summarizes all filtered events beyond the page', async () => {
+    const createResponse = await request(app).post('/api/ingredients').send({
+      name: 'Waste summary chicken',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 180,
+    })
+    const ingredientId = createResponse.body._id
+    const first = await request(app)
+      .post(`/api/ingredients/${ingredientId}/waste`)
+      .send({ quantity: 1.5, reasonCode: 'WASTE_SPOILAGE' })
+    await request(app).put(`/api/ingredients/${ingredientId}`).send({ costPerUnit: 220 })
+    const second = await request(app)
+      .post(`/api/ingredients/${ingredientId}/waste`)
+      .send({ quantity: 0.5, reasonCode: 'WASTE_EXPIRED' })
+    await request(app)
+      .post(`/api/ingredients/${ingredientId}/adjust-stock`)
+      .send({ type: 'OUT', quantity: 0.5 })
+
+    await InventoryTransaction.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(first.body.transaction._id) },
+      { $set: { createdAt: new Date('2026-08-01T12:00:00.000Z') } },
+    )
+    await InventoryTransaction.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(second.body.transaction._id) },
+      { $set: { createdAt: new Date('2026-08-02T12:00:00.000Z') } },
+    )
+
+    const allWaste = await request(app).get('/api/waste').query({
+      ingredientId,
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-02',
+      page: 1,
+      limit: 1,
+      sortOrder: 'asc',
+    })
+    expect(allWaste.status).toBe(200)
+    expect(allWaste.body.items).toHaveLength(1)
+    expect(allWaste.body.pagination).toMatchObject({ total: 2, totalPages: 2 })
+    expect(allWaste.body.summary).toMatchObject({ eventCount: 2, totalWasteValue: 380 })
+    expect(allWaste.body.summary.byReason).toEqual(
+      expect.arrayContaining([
+        { reasonCode: 'WASTE_SPOILAGE', eventCount: 1, totalWasteValue: 270 },
+        { reasonCode: 'WASTE_EXPIRED', eventCount: 1, totalWasteValue: 110 },
+      ]),
+    )
+
+    const expiredOnly = await request(app).get('/api/waste').query({ ingredientId, reasonCode: 'WASTE_EXPIRED' })
+    expect(expiredOnly.status).toBe(200)
+    expect(expiredOnly.body).toMatchObject({
+      summary: { eventCount: 1, totalWasteValue: 110 },
+    })
+    expect(expiredOnly.body.items[0].reasonCode).toBe('WASTE_EXPIRED')
   })
 
   test('CookEvent failure rolls stock and ledger back together', async () => {
