@@ -2,18 +2,12 @@ const express = require('express')
 const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
+const { WASTE_REASON_CODES, WASTE_REASON_LABELS } = require('../domain/inventoryReasonCodes')
 
 const router = express.Router()
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
-const WASTE_REASON_CODES = [
-  'WASTE_SPOILAGE',
-  'WASTE_EXPIRED',
-  'WASTE_PREP',
-  'WASTE_DAMAGE',
-  'WASTE_OTHER',
-]
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 const sendError = (res, status, code, message, details) => {
@@ -139,7 +133,10 @@ router.get('/', async (req, res) => {
           unitCost: transaction.unitCost,
           lossValue: getLossValue(transaction),
           reasonCode: transaction.reasonCode,
-          note: transaction.reason || '',
+          note:
+            transaction.reason === `Waste: ${WASTE_REASON_LABELS[transaction.reasonCode]}`
+              ? ''
+              : transaction.reason || '',
           previousStock: transaction.previousStock,
           newStock: transaction.newStock,
           operationId: transaction.operationId,

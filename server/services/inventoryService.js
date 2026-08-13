@@ -59,6 +59,7 @@ const createIngredientWithInitialStock = async ({ ingredientData }) => {
         baseUnit: getBaseUnit(ingredientData.unit),
         stockQuantityBase: convertToBase(ingredientData.stockQuantity, ingredientData.unit),
         reorderLevelBase: convertToBase(ingredientData.reorderLevel, ingredientData.unit),
+        parLevelBase: convertToBase(ingredientData.parLevel ?? 0, ingredientData.unit),
         averageCostPerBaseUnit: costPerDisplayUnitToBase(
           ingredientData.costPerUnit,
           ingredientData.unit,

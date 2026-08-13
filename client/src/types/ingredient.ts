@@ -21,6 +21,7 @@ export interface Ingredient {
   stockQuantity: number
   costPerUnit: number
   reorderLevel?: number
+  parLevel?: number
   stockStatus: StockStatus
   isActive: boolean
   manufacturer?: string

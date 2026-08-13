@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const { INVENTORY_REASON_CODES } = require('../domain/inventoryReasonCodes')
 
 const inventoryTransactionSchema = new mongoose.Schema(
   {
@@ -25,19 +26,7 @@ const inventoryTransactionSchema = new mongoose.Schema(
     },
     reasonCode: {
       type: String,
-      enum: [
-        'INITIAL_STOCK',
-        'MANUAL_RECEIPT',
-        'MANUAL_USAGE',
-        'PHYSICAL_COUNT',
-        'MANUAL_CORRECTION',
-        'RECIPE_COOK',
-        'WASTE_SPOILAGE',
-        'WASTE_EXPIRED',
-        'WASTE_PREP',
-        'WASTE_DAMAGE',
-        'WASTE_OTHER',
-      ],
+      enum: INVENTORY_REASON_CODES,
     },
     previousStock: {
       type: Number,

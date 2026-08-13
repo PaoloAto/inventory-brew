@@ -58,6 +58,14 @@ const ingredientSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    parLevel: {
+      type: Number,
+      min: 0,
+    },
+    parLevelBase: {
+      type: Number,
+      min: 0,
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -77,6 +85,9 @@ ingredientSchema.pre('validate', function populateCanonicalIngredientFields() {
   }
   if (this.reorderLevelBase === undefined) {
     this.reorderLevelBase = convertToBase(this.reorderLevel, this.unit)
+  }
+  if (this.parLevel !== undefined && this.parLevelBase === undefined) {
+    this.parLevelBase = convertToBase(this.parLevel, this.unit)
   }
   if (this.averageCostPerBaseUnit === undefined) {
     this.averageCostPerBaseUnit = costPerDisplayUnitToBase(this.costPerUnit, this.unit)

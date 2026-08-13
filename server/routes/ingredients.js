@@ -5,6 +5,7 @@ const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const { convertToBase, costPerDisplayUnitToBase } = require('../domain/units')
+const { WASTE_REASON_CODES, WASTE_REASON_LABELS } = require('../domain/inventoryReasonCodes')
 const {
   createIngredientWithInitialStock,
   adjustIngredientStock,
@@ -26,9 +27,10 @@ const CREATE_ALLOWED_FIELDS = new Set([
   'stockQuantity',
   'costPerUnit',
   'reorderLevel',
+  'parLevel',
   'isActive',
 ])
-const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'isActive'])
+const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'parLevel', 'isActive'])
 const ADJUST_ALLOWED_FIELDS = new Set([
   'type',
   'quantity',
@@ -43,21 +45,7 @@ const ADJUST_REASON_CODES = {
   OUT: ['MANUAL_USAGE'],
   ADJUST: ['PHYSICAL_COUNT', 'MANUAL_CORRECTION'],
 }
-const WASTE_REASON_CODES = [
-  'WASTE_SPOILAGE',
-  'WASTE_EXPIRED',
-  'WASTE_PREP',
-  'WASTE_DAMAGE',
-  'WASTE_OTHER',
-]
 const WASTE_ALLOWED_FIELDS = new Set(['quantity', 'reasonCode', 'note'])
-const WASTE_REASON_LABELS = {
-  WASTE_SPOILAGE: 'Spoilage',
-  WASTE_EXPIRED: 'Expired',
-  WASTE_PREP: 'Prep waste',
-  WASTE_DAMAGE: 'Damage',
-  WASTE_OTHER: 'Other',
-}
 
 const normalizeIngredient = (ingredient) => {
   const normalized = typeof ingredient.toObject === 'function' ? ingredient.toObject() : ingredient
@@ -146,6 +134,10 @@ const validateCreatePayload = (payload) => {
   const stockQuantity = normalizeNonNegativeNumber(payload.stockQuantity, 'stockQuantity', details, 0)
   const costPerUnit = normalizeNonNegativeNumber(payload.costPerUnit, 'costPerUnit', details, 0)
   const reorderLevel = normalizeNonNegativeNumber(payload.reorderLevel, 'reorderLevel', details, 0)
+  const parLevel = normalizeNonNegativeNumber(payload.parLevel, 'parLevel', details, 0)
+  if (parLevel > 0 && reorderLevel > 0 && parLevel < reorderLevel) {
+    details.push('parLevel must be greater than or equal to reorderLevel when both are configured')
+  }
 
   let isActive = true
   if (payload.isActive !== undefined) {
@@ -166,6 +158,7 @@ const validateCreatePayload = (payload) => {
       stockQuantity,
       costPerUnit,
       reorderLevel,
+      parLevel,
       isActive,
     },
   }
@@ -213,6 +206,11 @@ const validateUpdatePayload = (payload) => {
   if (payload.reorderLevel !== undefined) {
     const reorderLevel = normalizeNonNegativeNumber(payload.reorderLevel, 'reorderLevel', details)
     if (reorderLevel !== undefined) value.reorderLevel = reorderLevel
+  }
+
+  if (payload.parLevel !== undefined) {
+    const parLevel = normalizeNonNegativeNumber(payload.parLevel, 'parLevel', details)
+    if (parLevel !== undefined) value.parLevel = parLevel
   }
 
   if (payload.isActive !== undefined) {
@@ -642,6 +640,16 @@ router.put('/:id', async (req, res) => {
 
     if (value.reorderLevel !== undefined) {
       value.reorderLevelBase = convertToBase(value.reorderLevel, existing.unit)
+    }
+    const nextReorderLevel = value.reorderLevel ?? existing.reorderLevel ?? 0
+    const nextParLevel = value.parLevel ?? existing.parLevel ?? 0
+    if (nextParLevel > 0 && nextReorderLevel > 0 && nextParLevel < nextReorderLevel) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', [
+        'parLevel must be greater than or equal to reorderLevel when both are configured',
+      ])
+    }
+    if (value.parLevel !== undefined) {
+      value.parLevelBase = convertToBase(value.parLevel, existing.unit)
     }
     if (value.costPerUnit !== undefined) {
       value.averageCostPerBaseUnit = costPerDisplayUnitToBase(value.costPerUnit, existing.unit)

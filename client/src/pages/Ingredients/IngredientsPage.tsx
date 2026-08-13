@@ -221,6 +221,7 @@ export const IngredientsPage = () => {
           category: input.category,
           costPerUnit: input.costPerUnit,
           reorderLevel: input.reorderLevel,
+          parLevel: input.parLevel,
           isActive: input.isActive,
         })
         showSnackbar('Ingredient updated', { severity: 'success' })
@@ -233,6 +234,7 @@ export const IngredientsPage = () => {
           stockQuantity: input.stockQuantity,
           costPerUnit: input.costPerUnit,
           reorderLevel: input.reorderLevel,
+          parLevel: input.parLevel,
           isActive: input.isActive,
         })
         showSnackbar('Ingredient added', { severity: 'success' })
@@ -317,7 +319,12 @@ export const IngredientsPage = () => {
       return result
     } catch (error) {
       if (getErrorCode(error) === 'INSUFFICIENT_STOCK') {
+        setWasting(null)
         await loadIngredients()
+        showSnackbar('Stock changed while you were recording waste. The current quantity has been refreshed.', {
+          severity: 'warning',
+        })
+        return
       }
       showSnackbar(getErrorMessage(error, 'Failed to record waste'), { severity: 'error' })
     } finally {

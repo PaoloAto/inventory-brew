@@ -10,6 +10,7 @@ export interface IngredientDTO {
   stockQuantity: number
   costPerUnit: number
   reorderLevel?: number
+  parLevel?: number
   stockStatus: StockStatus
   isActive: boolean
   createdAt: string
@@ -55,6 +56,7 @@ export interface IngredientWritePayload {
   stockQuantity?: number
   costPerUnit: number
   reorderLevel?: number
+  parLevel?: number
   isActive?: boolean
 }
 
@@ -65,6 +67,7 @@ export interface IngredientUpdatePayload {
   unit?: Unit
   costPerUnit?: number
   reorderLevel?: number
+  parLevel?: number
   isActive?: boolean
 }
 
@@ -101,6 +104,7 @@ export const toIngredient = (dto: IngredientDTO): Ingredient => ({
   stockQuantity: dto.stockQuantity,
   costPerUnit: dto.costPerUnit,
   reorderLevel: dto.reorderLevel,
+  parLevel: dto.parLevel,
   stockStatus: dto.stockStatus,
   isActive: dto.isActive,
 })

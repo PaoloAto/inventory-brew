@@ -1278,6 +1278,7 @@ describe('Inventory Brew API integration', () => {
     })
     expect(allWaste.status).toBe(200)
     expect(allWaste.body.items).toHaveLength(1)
+    expect(allWaste.body.items[0].note).toBe('')
     expect(allWaste.body.pagination).toMatchObject({ total: 2, totalPages: 2 })
     expect(allWaste.body.summary).toMatchObject({ eventCount: 2, totalWasteValue: 380 })
     expect(allWaste.body.summary.byReason).toEqual(
@@ -1293,6 +1294,147 @@ describe('Inventory Brew API integration', () => {
       summary: { eventCount: 1, totalWasteValue: 110 },
     })
     expect(expiredOnly.body.items[0].reasonCode).toBe('WASTE_EXPIRED')
+  })
+
+  test('ingredient par levels save with canonical units and reject targets below reorder level', async () => {
+    const created = await request(app).post('/api/ingredients').send({
+      name: 'Par level flour',
+      unit: 'kg',
+      stockQuantity: 2,
+      costPerUnit: 100,
+      reorderLevel: 0.5,
+      parLevel: 2,
+    })
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({ parLevel: 2, parLevelBase: 2000 })
+
+    const updated = await request(app)
+      .put(`/api/ingredients/${created.body._id}`)
+      .send({ parLevel: 3 })
+    expect(updated.status).toBe(200)
+    expect(updated.body).toMatchObject({ parLevel: 3, parLevelBase: 3000 })
+
+    const invalid = await request(app).post('/api/ingredients').send({
+      name: 'Invalid par level flour',
+      unit: 'kg',
+      stockQuantity: 1,
+      costPerUnit: 10,
+      reorderLevel: 2,
+      parLevel: 1,
+    })
+    expect(invalid.status).toBe(400)
+    expect(invalid.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  test('inventory planning classifies depletion from the ledger and keeps summaries outside pagination', async () => {
+    const now = new Date()
+    const oldEnough = new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000)
+    const recent = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    const outsideWindow = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000)
+    const chickenResponse = await request(app).post('/api/ingredients').send({
+      name: 'Planning chicken breast',
+      category: 'Planning',
+      unit: 'kg',
+      stockQuantity: 3,
+      costPerUnit: 180,
+      reorderLevel: 4,
+      parLevel: 12,
+    })
+    const legacyResponse = await request(app).post('/api/ingredients').send({
+      name: 'Planning legacy stock',
+      category: 'Planning',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 10,
+      reorderLevel: 4,
+    })
+    const noDepletionResponse = await request(app).post('/api/ingredients').send({
+      name: 'Planning quiet stock',
+      category: 'Planning',
+      unit: 'kg',
+      stockQuantity: 10,
+      costPerUnit: 10,
+      reorderLevel: 4,
+    })
+    await Ingredient.collection.updateMany(
+      { _id: { $in: [
+        new mongoose.Types.ObjectId(chickenResponse.body._id),
+        new mongoose.Types.ObjectId(legacyResponse.body._id),
+        new mongoose.Types.ObjectId(noDepletionResponse.body._id),
+      ] } },
+      { $set: { createdAt: oldEnough } },
+    )
+    await InventoryTransaction.collection.insertMany([
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'OUT', quantity: 18, deltaQuantity: -18, previousStock: 21, newStock: 3,
+        reasonCode: 'RECIPE_COOK', reason: 'Cook', unitCost: 180, referenceType: 'recipe', createdAt: recent, updatedAt: recent,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'OUT', quantity: 3, deltaQuantity: -3, previousStock: 6, newStock: 3,
+        reasonCode: 'MANUAL_USAGE', reason: 'Use', unitCost: 180, referenceType: 'manual', createdAt: recent, updatedAt: recent,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'OUT', quantity: 3, deltaQuantity: -3, previousStock: 6, newStock: 3,
+        reasonCode: 'WASTE_SPOILAGE', reason: 'Waste', unitCost: 180, referenceType: 'manual', createdAt: recent, updatedAt: recent,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'OUT', quantity: 99, deltaQuantity: -99, previousStock: 102, newStock: 3,
+        reasonCode: 'RECIPE_COOK', reason: 'Old cook', unitCost: 180, referenceType: 'recipe', createdAt: outsideWindow, updatedAt: outsideWindow,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'IN', quantity: 10, deltaQuantity: 10, previousStock: 3, newStock: 13,
+        reasonCode: 'MANUAL_RECEIPT', reason: 'Receipt', unitCost: 180, referenceType: 'manual', createdAt: recent, updatedAt: recent,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(chickenResponse.body._id),
+        type: 'ADJUST', quantity: 2, deltaQuantity: 2, previousStock: 1, newStock: 3,
+        reasonCode: 'PHYSICAL_COUNT', reason: 'Count', unitCost: 180, referenceType: 'manual', createdAt: recent, updatedAt: recent,
+      },
+      {
+        ingredientId: new mongoose.Types.ObjectId(legacyResponse.body._id),
+        type: 'OUT', quantity: 2, deltaQuantity: -2, previousStock: 12, newStock: 10,
+        reason: 'Legacy use', unitCost: 10, referenceType: 'manual', createdAt: recent, updatedAt: recent,
+      },
+    ])
+
+    const planning = await request(app).get('/api/planning/inventory').query({
+      lookbackDays: 30,
+      search: 'Planning chicken breast',
+    })
+    expect(planning.status).toBe(200)
+    expect(planning.body.items).toHaveLength(1)
+    expect(planning.body.items[0]).toMatchObject({
+      consumptionQuantity: 21,
+      wasteQuantity: 3,
+      otherOutQuantity: 0,
+      depletionQuantity: 24,
+      historyCoverageDays: 30,
+      dataSufficient: true,
+      reorderTriggered: true,
+      parConfigured: true,
+      suggestedReorderQuantity: 9,
+      daysUntilReorder: 0,
+    })
+    expect(planning.body.items[0].averageDailyConsumption).toBeCloseTo(0.7)
+    expect(planning.body.items[0].averageDailyWaste).toBeCloseTo(0.1)
+    expect(planning.body.items[0].averageDailyDepletion).toBeCloseTo(0.8)
+    expect(planning.body.items[0].daysRemaining).toBeCloseTo(3.75)
+
+    const legacy = await request(app).get('/api/planning/inventory').query({ lookbackDays: 30, search: 'legacy stock' })
+    expect(legacy.status).toBe(200)
+    expect(legacy.body.items[0]).toMatchObject({ consumptionQuantity: 2, wasteQuantity: 0, depletionQuantity: 2 })
+
+    const paged = await request(app).get('/api/planning/inventory').query({ category: 'Planning', page: 1, limit: 1 })
+    expect(paged.status).toBe(200)
+    expect(paged.body.items).toHaveLength(1)
+    expect(paged.body.summary).toMatchObject({ ingredientCount: 3, reorderTriggeredCount: 1, parUnconfiguredCount: 2, noDepletionDataCount: 1 })
+    const quiet = await request(app).get('/api/planning/inventory').query({ search: 'quiet stock' })
+    expect(quiet.body.items[0]).toMatchObject({ averageDailyDepletion: 0, daysRemaining: null, daysUntilReorder: null })
   })
 
   test('CookEvent failure rolls stock and ledger back together', async () => {

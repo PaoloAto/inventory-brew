@@ -39,6 +39,7 @@ const getInitialValues = (initialData?: Ingredient | null): IngredientInput => {
     stockQuantity: 0,
     costPerUnit: 0,
     reorderLevel: 0,
+    parLevel: 0,
     category: '',
     isActive: true,
   }
@@ -71,6 +72,16 @@ export const IngredientDialog = ({
     if (values.costPerUnit < 0) nextErrors.costPerUnit = 'Must be non-negative'
     if (values.reorderLevel !== undefined && values.reorderLevel < 0) {
       nextErrors.reorderLevel = 'Must be non-negative'
+    }
+    if (values.parLevel !== undefined && values.parLevel < 0) {
+      nextErrors.parLevel = 'Must be non-negative'
+    }
+    if (
+      (values.parLevel ?? 0) > 0 &&
+      (values.reorderLevel ?? 0) > 0 &&
+      (values.parLevel ?? 0) < (values.reorderLevel ?? 0)
+    ) {
+      nextErrors.parLevel = 'Must be at least the reorder point when both are configured'
     }
     setErrors(nextErrors)
     return Object.keys(nextErrors).length === 0
@@ -186,12 +197,24 @@ export const IngredientDialog = ({
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
               type="number"
-              label="Reorder level"
+              label={`Reorder point (${values.unit})`}
               value={values.reorderLevel ?? 0}
               onChange={(e) => handleChange('reorderLevel', Number(e.target.value))}
               fullWidth
               error={Boolean(errors.reorderLevel)}
-              helperText={errors.reorderLevel}
+              helperText={errors.reorderLevel || 'When replenishment should begin.'}
+              inputProps={{ min: 0 }}
+            />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <TextField
+              type="number"
+              label={`Par level (${values.unit})`}
+              value={values.parLevel ?? 0}
+              onChange={(e) => handleChange('parLevel', Number(e.target.value))}
+              fullWidth
+              error={Boolean(errors.parLevel)}
+              helperText={errors.parLevel || 'Stock quantity to restore toward.'}
               inputProps={{ min: 0 }}
             />
           </Grid>
