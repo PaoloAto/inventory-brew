@@ -367,6 +367,46 @@ describe('Inventory Brew API integration', () => {
     ]))
   })
 
+  test('Stock Count treats decimal-equivalent canonical quantities as a no-op', async () => {
+    const created = await request(app).post('/api/ingredients').send({
+      name: 'Decimal count flour',
+      unit: 'kg',
+      stockQuantity: 0,
+      costPerUnit: 100,
+    })
+    expect(created.status).toBe(201)
+    for (const quantity of [0.1, 0.2]) {
+      expect((await request(app)
+        .post(`/api/ingredients/${created.body._id}/adjust-stock`)
+        .send({ type: 'IN', quantity, reason: 'Decimal receipt' })).status).toBe(200)
+    }
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Decimal no-op count' })
+    expect((await request(app).put(`/api/stocktakes/${started.body._id}`).send({
+      counts: [{ ingredientId: created.body._id, countedQuantity: 0.3 }],
+    })).status).toBe(200)
+
+    const posted = await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()
+
+    expect(posted.status).toBe(200)
+    expect(posted.body.status).toBe('POSTED')
+    expect(posted.body.lines[0]).toMatchObject({
+      countedQuantity: 0.3,
+      countedQuantityBase: 300,
+      varianceQuantity: 0,
+      varianceQuantityBase: 0,
+      varianceValue: 0,
+    })
+    expect(posted.body.summary).toMatchObject({
+      varianceLineCount: 0,
+      shortageLineCount: 0,
+      overageLineCount: 0,
+      netVarianceValue: 0,
+      absoluteVarianceValue: 0,
+    })
+    expect(await Ingredient.findById(created.body._id).lean()).toMatchObject({ stockQuantityBase: 300 })
+    expect(await InventoryTransaction.countDocuments({ referenceType: 'stocktake', referenceId: started.body._id })).toBe(0)
+  })
+
   test('Stock Count detects canonical stale stock and applies none of its adjustments', async () => {
     const ingredients = await Ingredient.create([
       { name: 'Conflict chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 180 },

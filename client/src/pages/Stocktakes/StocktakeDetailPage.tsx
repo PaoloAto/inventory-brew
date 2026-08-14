@@ -43,6 +43,8 @@ import { ledgerTokens, numericSx } from '../../theme'
 type CountValues = Record<string, string>
 const statusLabel = { DRAFT: 'In progress', POSTED: 'Completed', CANCELLED: 'Cancelled' } as const
 const statusTone = { DRAFT: 'warning', POSTED: 'success', CANCELLED: 'neutral' } as const
+const ABS_EPSILON = 1e-9
+const REL_EPSILON = 1e-9
 
 const valuesFrom = (stocktake: Stocktake): CountValues => Object.fromEntries(
   stocktake.lines.map((line) => [line.ingredientId, line.countedQuantity === null ? '' : String(line.countedQuantity)]),
@@ -52,12 +54,23 @@ const parseCount = (value: string) => {
   const number = Number(value)
   return Number.isFinite(number) && number >= 0 ? number : undefined
 }
+const isValidCount = (value: string) => typeof parseCount(value) === 'number'
+const approximatelyEqual = (left: number, right: number) =>
+  Math.abs(left - right) <=
+  Math.max(ABS_EPSILON, REL_EPSILON * Math.max(Math.abs(left), Math.abs(right), 1))
+const displayDifference = (count: number, expected: number) =>
+  approximatelyEqual(count, expected) ? 0 : count - expected
+const completedIdsFrom = (stocktake: Stocktake) => new Set(
+  stocktake.lines.filter((line) => line.countedQuantity !== null).map((line) => line.ingredientId),
+)
 
 export const StocktakeDetailPage = () => {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const [stocktake, setStocktake] = useState<Stocktake | null>(null)
   const [values, setValues] = useState<CountValues>({})
+  const [completedInputIds, setCompletedInputIds] = useState<Set<string>>(() => new Set())
+  const [editingInputId, setEditingInputId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [uncountedOnly, setUncountedOnly] = useState(false)
   const [step, setStep] = useState<'counts' | 'review'>('counts')
@@ -75,6 +88,7 @@ export const StocktakeDetailPage = () => {
         if (!active) return
         setStocktake(response)
         setValues(valuesFrom(response))
+        setCompletedInputIds(completedIdsFrom(response))
       })
       .catch((error: unknown) => active && setMessage({ severity: 'error', text: getErrorMessage(error, 'Could not load this stock count.') }))
       .finally(() => active && setLoading(false))
@@ -86,15 +100,16 @@ export const StocktakeDetailPage = () => {
     const query = search.trim().toLowerCase()
     return stocktake.lines.filter((line) => {
       const matchesSearch = !query || line.ingredientNameSnapshot.toLowerCase().includes(query) || line.categorySnapshot.toLowerCase().includes(query)
-      return matchesSearch && (!uncountedOnly || values[line.ingredientId]?.trim() === '')
+      const remainsVisibleWhileEditing = editingInputId === line.ingredientId
+      return matchesSearch && (!uncountedOnly || !completedInputIds.has(line.ingredientId) || remainsVisibleWhileEditing)
     })
-  }, [stocktake, search, uncountedOnly, values])
+  }, [stocktake, search, uncountedOnly, completedInputIds, editingInputId])
 
-  const countedLineCount = stocktake?.lines.filter((line) => values[line.ingredientId]?.trim() !== '').length ?? 0
+  const countedLineCount = stocktake?.lines.filter((line) => isValidCount(values[line.ingredientId] ?? '')).length ?? 0
   const progress = stocktake?.lines.length ? (countedLineCount / stocktake.lines.length) * 100 : 0
   const differences = useMemo(() => stocktake?.lines.filter((line) => {
     const count = parseCount(values[line.ingredientId] ?? '')
-    return count !== null && count !== undefined && count !== line.expectedStockQuantitySnapshot
+    return typeof count === 'number' && displayDifference(count, line.expectedStockQuantitySnapshot) !== 0
   }) ?? [], [stocktake, values])
 
   const payload = () => {
@@ -111,6 +126,8 @@ export const StocktakeDetailPage = () => {
     try {
       const saved = await saveStocktake(id, counts)
       setStocktake(saved)
+      setValues(valuesFrom(saved))
+      setCompletedInputIds(completedIdsFrom(saved))
       if (showSuccess) setMessage({ severity: 'success', text: 'Stock count saved for later.' })
       return saved
     } catch (error) {
@@ -123,7 +140,7 @@ export const StocktakeDetailPage = () => {
 
   const handleReview = async () => {
     if (!stocktake) return
-    const missing = stocktake.lines.filter((line) => values[line.ingredientId]?.trim() === '').length
+    const missing = stocktake.lines.filter((line) => !isValidCount(values[line.ingredientId] ?? '')).length
     if (missing) {
       setUncountedOnly(true)
       setMessage({ severity: 'warning', text: `${missing} ${missing === 1 ? 'item still needs' : 'items still need'} to be counted.` })
@@ -138,6 +155,7 @@ export const StocktakeDetailPage = () => {
       const completed = await finishStocktake(id)
       setStocktake(completed)
       setValues(valuesFrom(completed))
+      setCompletedInputIds(completedIdsFrom(completed))
       setStep('counts')
       setMessage({ severity: 'success', text: 'Stock Count completed. Inventory is up to date.' })
     } catch (error) {
@@ -165,6 +183,16 @@ export const StocktakeDetailPage = () => {
     const index = visibleLines.findIndex((line) => line.ingredientId === lineId)
     const next = visibleLines[index + 1]
     if (next) inputRefs.current.get(next.ingredientId)?.focus()
+  }
+
+  const completeInput = (lineId: string) => {
+    setEditingInputId((current) => current === lineId ? null : current)
+    setCompletedInputIds((current) => {
+      const next = new Set(current)
+      if (isValidCount(values[lineId] ?? '')) next.add(lineId)
+      else next.delete(lineId)
+      return next
+    })
   }
 
   if (loading) return <Stack spacing={2}><Skeleton width={260} height={48} /><Skeleton height={12} /><Skeleton variant="rectangular" height={360} /></Stack>
@@ -212,7 +240,7 @@ export const StocktakeDetailPage = () => {
       {differences.length === 0 ? <Alert severity="success" sx={{ mb: 2 }}>Everything matches the system quantities.</Alert> : (
         <Stack spacing={1.25} sx={{ mb: 3 }}>{differences.map((line) => {
           const count = parseCount(values[line.ingredientId]) as number
-          const difference = count - line.expectedStockQuantitySnapshot
+          const difference = displayDifference(count, line.expectedStockQuantitySnapshot)
           return <Box key={line.ingredientId} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', p: { xs: 2, sm: 2.5 } }}>
             <Typography sx={{ fontWeight: 500 }}>{line.ingredientNameSnapshot}</Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 4 }} sx={{ mt: 1 }}>
@@ -251,8 +279,16 @@ export const StocktakeDetailPage = () => {
           <Stack direction="row" alignItems="center" spacing={1} sx={{ pl: { sm: 3 } }}><TextField
             value={values[line.ingredientId] ?? ''}
             onChange={(event) => setValues((current) => ({ ...current, [line.ingredientId]: event.target.value }))}
+            onFocus={() => setEditingInputId(line.ingredientId)}
+            onBlur={() => completeInput(line.ingredientId)}
             inputRef={(node: HTMLInputElement | null) => { if (node) inputRefs.current.set(line.ingredientId, node); else inputRefs.current.delete(line.ingredientId) }}
-            onKeyDown={(event) => { if (event.key === 'Enter' && parseCount(values[line.ingredientId] ?? '') !== undefined) { event.preventDefault(); focusNext(line.ingredientId) } }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && isValidCount(values[line.ingredientId] ?? '')) {
+                event.preventDefault()
+                completeInput(line.ingredientId)
+                focusNext(line.ingredientId)
+              }
+            }}
             type="number" inputMode="decimal" placeholder="Not counted" aria-label={`Physical count for ${line.ingredientNameSnapshot}`}
             slotProps={{ htmlInput: { min: 0, step: 'any' } }}
             sx={{ width: 150, '& input': { ...numericSx, fontSize: '1rem' } }}

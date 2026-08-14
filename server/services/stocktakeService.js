@@ -7,6 +7,13 @@ const {
   createOperationId,
 } = require('./inventoryService')
 
+const ABS_EPSILON = 1e-9
+const REL_EPSILON = 1e-9
+
+const approximatelyEqual = (left, right) =>
+  Math.abs(left - right) <=
+  Math.max(ABS_EPSILON, REL_EPSILON * Math.max(Math.abs(left), Math.abs(right), 1))
+
 const appError = (status, code, message, details) => {
   const error = new Error(message)
   error.isAppError = true
@@ -105,16 +112,20 @@ const postStocktake = async (stocktakeId) => {
       for (const line of stocktake.lines) {
         const ingredient = ingredientMap.get(String(line.ingredientId))
         const countedQuantityBase = convertToBase(line.countedQuantity, line.unit)
-        const varianceQuantity = line.countedQuantity - line.expectedStockQuantitySnapshot
-        const varianceQuantityBase = countedQuantityBase - line.expectedStockQuantityBaseSnapshot
+        const isZeroVariance = approximatelyEqual(
+          countedQuantityBase,
+          line.expectedStockQuantityBaseSnapshot,
+        )
+        const varianceQuantity = isZeroVariance ? 0 : line.countedQuantity - line.expectedStockQuantitySnapshot
+        const varianceQuantityBase = isZeroVariance ? 0 : countedQuantityBase - line.expectedStockQuantityBaseSnapshot
         const unitCostSnapshot = ingredient.costPerUnit
-        const varianceValue = varianceQuantity * unitCostSnapshot
+        const varianceValue = isZeroVariance ? 0 : varianceQuantity * unitCostSnapshot
         line.countedQuantityBase = countedQuantityBase
         line.varianceQuantity = varianceQuantity
         line.varianceQuantityBase = varianceQuantityBase
         line.unitCostSnapshot = unitCostSnapshot
         line.varianceValue = varianceValue
-        if (varianceQuantity !== 0) {
+        if (!isZeroVariance) {
           summary.varianceLineCount += 1
           if (varianceQuantity < 0) summary.shortageLineCount += 1
           else summary.overageLineCount += 1
