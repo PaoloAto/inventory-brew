@@ -45,6 +45,12 @@ const PlanningPage = lazy(() =>
   })),
 )
 
+const PurchasingPage = lazy(() =>
+  import('../pages/Purchasing/PurchasingPage').then((module) => ({
+    default: module.PurchasingPage,
+  })),
+)
+
 const RouteLoader = () => {
   return (
     <Box aria-label="Loading page" sx={{ pt: 0.5 }}>
@@ -78,6 +84,7 @@ export const AppRouter = () => {
             <Route path="/production" element={<ProductionPage />} />
             <Route path="/waste" element={<WastePage />} />
             <Route path="/planning" element={<PlanningPage />} />
+            <Route path="/purchasing" element={<PurchasingPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

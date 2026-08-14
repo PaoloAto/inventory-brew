@@ -6,6 +6,9 @@ const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
 const CookEvent = require('../models/CookEvent')
+const Supplier = require('../models/Supplier')
+const PurchaseOrder = require('../models/PurchaseOrder')
+const PurchaseReceipt = require('../models/PurchaseReceipt')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const {
   getBaseUnit,
@@ -55,6 +58,9 @@ describe('Inventory Brew API integration', () => {
       Recipe.deleteMany({}),
       InventoryTransaction.deleteMany({}),
       CookEvent.deleteMany({}),
+      Supplier.deleteMany({}),
+      PurchaseOrder.deleteMany({}),
+      PurchaseReceipt.deleteMany({}),
     ])
   })
 
@@ -1663,5 +1669,81 @@ describe('Inventory Brew API integration', () => {
     expect(readyResponse.body.dbConnected).toBe(true)
     expect(readyResponse.body.transactionsSupported).toBe(true)
     expect(readyResponse.body.canonicalDataReady).toBe(true)
+  })
+
+  test('planning excludes future transactions, uses young coverage, and validates sort order', async () => {
+    const ingredient = await Ingredient.create({ name: 'Young planning stock', unit: 'kg', stockQuantity: 20, costPerUnit: 10, reorderLevel: 4, createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) })
+    await InventoryTransaction.create([
+      { ingredientId: ingredient._id, type: 'OUT', quantity: 10, deltaQuantity: -10, previousStock: 20, newStock: 10, reasonCode: 'MANUAL_USAGE', createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      { ingredientId: ingredient._id, type: 'OUT', quantity: 7, deltaQuantity: -7, previousStock: 10, newStock: 3, reasonCode: 'MANUAL_CORRECTION', createdAt: new Date(Date.now() - 60 * 60 * 1000) },
+      { ingredientId: ingredient._id, type: 'OUT', quantity: 99, deltaQuantity: -99, previousStock: 3, newStock: 0, reasonCode: 'MANUAL_USAGE', createdAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+    ])
+    const response = await request(app).get('/api/planning/inventory').query({ search: 'Young planning stock', lookbackDays: 30 })
+    expect(response.status).toBe(200)
+    expect(response.body.items[0]).toMatchObject({ consumptionQuantity: 10, otherOutQuantity: 7, depletionQuantity: 17 })
+    expect(response.body.items[0].historyCoverageDays).toBeGreaterThanOrEqual(4)
+    expect(response.body.items[0].historyCoverageDays).toBeLessThanOrEqual(6)
+    expect(response.body.items[0].averageDailyDepletion).toBeCloseTo(17 / response.body.items[0].historyCoverageDays)
+    const invalidSort = await request(app).get('/api/planning/inventory').query({ sortOrder: 'sideways' })
+    expect(invalidSort.status).toBe(400)
+    expect(invalidSort.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  test('suppliers archive and restore, and draft orders retain creation snapshots', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Metro Foods', contactName: 'Pat' })
+    expect(supplier.status).toBe(201)
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'PO chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 100, preferredSupplierId: supplier.body._id })
+    const duplicate = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 2, expectedUnitCost: 150 }, { ingredientId: ingredient.body._id, orderedQuantity: 1, expectedUnitCost: 150 }] })
+    expect(duplicate.status).toBe(400)
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 10, expectedUnitCost: 150 }] })
+    expect(draft.status).toBe(201)
+    expect(draft.body).toMatchObject({ status: 'DRAFT', supplierNameSnapshot: 'Metro Foods' })
+    expect(draft.body.items[0]).toMatchObject({ ingredientNameSnapshot: 'PO chicken', unit: 'kg', receivedQuantity: 0 })
+    const archive = await request(app).delete(`/api/suppliers/${supplier.body._id}`)
+    expect(archive.status).toBe(200)
+    const restore = await request(app).patch(`/api/suppliers/${supplier.body._id}/restore`)
+    expect(restore.status).toBe(200)
+  })
+
+  test('purchase receipts atomically update stock, weighted average, order state, ledger and immutable snapshots', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Receipt supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Receipt chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 100 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 10, expectedUnitCost: 150 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    expect(ordered.status).toBe(200)
+    const itemId = ordered.body.items[0]._id
+    const first = await request(app).post(`/api/purchase-orders/${ordered.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 6, unitCost: 160 }] })
+    expect(first.status).toBe(200)
+    expect(first.body.purchaseOrder).toMatchObject({ status: 'PARTIALLY_RECEIVED' })
+    expect(first.body.purchaseOrder.items[0].receivedQuantity).toBeCloseTo(6)
+    const current = await Ingredient.findById(ingredient.body._id).lean()
+    expect(current.stockQuantity).toBeCloseTo(16)
+    expect(current.costPerUnit).toBeCloseTo(122.5)
+    const ledger = await InventoryTransaction.findOne({ operationId: first.body.operationId }).lean()
+    expect(ledger).toMatchObject({ type: 'IN', reasonCode: 'PURCHASE_RECEIPT', unitCost: 160, referenceType: 'purchase' })
+    const second = await request(app).post(`/api/purchase-orders/${ordered.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 4, unitCost: 170 }] })
+    expect(second.status).toBe(200)
+    expect(second.body.purchaseOrder.status).toBe('RECEIVED')
+    const completed = await Ingredient.findById(ingredient.body._id).lean()
+    expect(completed.costPerUnit).toBeCloseTo(132)
+    await Supplier.findByIdAndUpdate(supplier.body._id, { name: 'Renamed supplier' })
+    await Ingredient.findByIdAndUpdate(ingredient.body._id, { name: 'Renamed chicken' })
+    const receipts = await request(app).get('/api/purchase-receipts').query({ purchaseOrderId: ordered.body._id })
+    expect(receipts.body.items).toHaveLength(2)
+    expect(receipts.body.items[0]).toMatchObject({ supplierNameSnapshot: 'Receipt supplier' })
+    expect(receipts.body.items.flatMap((receipt) => receipt.items).map((line) => line.ingredientNameSnapshot)).toContain('Receipt chicken')
+  })
+
+  test('over-receipt leaves order quantities, stock, ledger and receipts unchanged', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Guard supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Guard rice', unit: 'kg', stockQuantity: 1, costPerUnit: 5 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 2, expectedUnitCost: 5 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const rejected = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: ordered.body.items[0]._id, quantity: 3, unitCost: 5 }] })
+    expect(rejected.status).toBe(409)
+    expect(rejected.body.error.code).toBe('RECEIPT_CONFLICT')
+    expect((await Ingredient.findById(ingredient.body._id)).stockQuantity).toBe(1)
+    expect(await InventoryTransaction.countDocuments({ reasonCode: 'PURCHASE_RECEIPT' })).toBe(0)
+    expect(await PurchaseReceipt.countDocuments()).toBe(0)
   })
 })

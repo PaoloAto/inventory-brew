@@ -25,6 +25,7 @@ import {
 } from '../../api/ingredients'
 import { getErrorCode, getErrorMessage } from '../../api/error'
 import { recordWaste, type RecordWastePayload } from '../../api/waste'
+import { listSuppliers, type Supplier } from '../../api/suppliers'
 import { IngredientDialog, type IngredientInput } from '../../components/inventory/IngredientDialog'
 import {
   IngredientTable,
@@ -96,6 +97,7 @@ export const IngredientsPage = () => {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [totalIngredients, setTotalIngredients] = useState(0)
   const [categoryOptions, setCategoryOptions] = useState<string[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -160,6 +162,23 @@ export const IngredientsPage = () => {
   }, [loadIngredientMeta])
 
   useEffect(() => {
+    void (async () => {
+      const catalog: Supplier[] = []
+      let supplierPage = 1
+      let totalPages = 1
+      try {
+        do {
+          const response = await listSuppliers({ page: supplierPage, limit: 100, sortOrder: 'asc' })
+          catalog.push(...response.items)
+          totalPages = response.pagination.totalPages
+          supplierPage += 1
+        } while (supplierPage <= totalPages)
+        setSuppliers(catalog)
+      } catch { setSuppliers([]) }
+    })()
+  }, [])
+
+  useEffect(() => {
     setPage(0)
   }, [debouncedSearch, stockFilter, categoryFilter, rowsPerPage])
 
@@ -222,6 +241,8 @@ export const IngredientsPage = () => {
           costPerUnit: input.costPerUnit,
           reorderLevel: input.reorderLevel,
           parLevel: input.parLevel,
+          preferredSupplierId: input.preferredSupplierId || null,
+          supplierSku: input.supplierSku,
           isActive: input.isActive,
         })
         showSnackbar('Ingredient updated', { severity: 'success' })
@@ -235,6 +256,8 @@ export const IngredientsPage = () => {
           costPerUnit: input.costPerUnit,
           reorderLevel: input.reorderLevel,
           parLevel: input.parLevel,
+          preferredSupplierId: input.preferredSupplierId || null,
+          supplierSku: input.supplierSku,
           isActive: input.isActive,
         })
         showSnackbar('Ingredient added', { severity: 'success' })
@@ -485,6 +508,7 @@ export const IngredientsPage = () => {
         saving={isSaving}
         onClose={() => setDialogOpen(false)}
         onSave={(input) => void handleSave(input)}
+        suppliers={suppliers}
       />
       <StockAdjustmentDialog
         open={Boolean(adjusting)}

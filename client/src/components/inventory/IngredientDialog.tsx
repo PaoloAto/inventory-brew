@@ -10,6 +10,7 @@ import {
   TextField,
 } from '@mui/material'
 import type { Ingredient, Unit } from '../../types/ingredient'
+import type { Supplier } from '../../api/suppliers'
 
 export type IngredientInput = Omit<Ingredient, 'id' | 'isActive' | 'stockStatus'> & {
   id?: string
@@ -22,6 +23,7 @@ interface IngredientDialogProps {
   saving?: boolean
   onClose: () => void
   onSave: (input: IngredientInput) => void
+  suppliers?: Supplier[]
 }
 
 const UNITS: Unit[] = ['pcs', 'g', 'kg', 'ml', 'l']
@@ -40,6 +42,8 @@ const getInitialValues = (initialData?: Ingredient | null): IngredientInput => {
     costPerUnit: 0,
     reorderLevel: 0,
     parLevel: 0,
+    preferredSupplierId: null,
+    supplierSku: '',
     category: '',
     isActive: true,
   }
@@ -51,6 +55,7 @@ export const IngredientDialog = ({
   saving = false,
   onClose,
   onSave,
+  suppliers = [],
 }: IngredientDialogProps) => {
   const [values, setValues] = useState<IngredientInput>(() => getInitialValues(initialData))
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -193,6 +198,15 @@ export const IngredientDialog = ({
               helperText={errors.costPerUnit}
               inputProps={{ min: 0, step: 0.01 }}
             />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField select label="Preferred supplier" value={values.preferredSupplierId ?? ''} onChange={(e) => handleChange('preferredSupplierId', e.target.value)} fullWidth helperText="Optional default supplier for purchasing.">
+              <MenuItem value="">None</MenuItem>
+              {suppliers.map((supplier) => <MenuItem key={supplier._id} value={supplier._id}>{supplier.name}</MenuItem>)}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField label="Supplier SKU" value={values.supplierSku ?? ''} onChange={(e) => handleChange('supplierSku', e.target.value)} fullWidth />
           </Grid>
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField

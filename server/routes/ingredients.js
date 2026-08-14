@@ -3,6 +3,7 @@ const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const Supplier = require('../models/Supplier')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const { convertToBase, costPerDisplayUnitToBase } = require('../domain/units')
 const { WASTE_REASON_CODES, WASTE_REASON_LABELS } = require('../domain/inventoryReasonCodes')
@@ -28,9 +29,11 @@ const CREATE_ALLOWED_FIELDS = new Set([
   'costPerUnit',
   'reorderLevel',
   'parLevel',
+  'preferredSupplierId',
+  'supplierSku',
   'isActive',
 ])
-const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'parLevel', 'isActive'])
+const UPDATE_ALLOWED_FIELDS = new Set(['name', 'manufacturer', 'category', 'unit', 'costPerUnit', 'reorderLevel', 'parLevel', 'preferredSupplierId', 'supplierSku', 'isActive'])
 const ADJUST_ALLOWED_FIELDS = new Set([
   'type',
   'quantity',
@@ -135,6 +138,12 @@ const validateCreatePayload = (payload) => {
   const costPerUnit = normalizeNonNegativeNumber(payload.costPerUnit, 'costPerUnit', details, 0)
   const reorderLevel = normalizeNonNegativeNumber(payload.reorderLevel, 'reorderLevel', details, 0)
   const parLevel = normalizeNonNegativeNumber(payload.parLevel, 'parLevel', details, 0)
+  let preferredSupplierId
+  if (payload.preferredSupplierId !== undefined && payload.preferredSupplierId !== null && payload.preferredSupplierId !== '') {
+    if (!mongoose.isValidObjectId(payload.preferredSupplierId)) details.push('preferredSupplierId must be a valid supplier id')
+    else preferredSupplierId = payload.preferredSupplierId
+  }
+  const supplierSku = normalizeOptionalString(payload.supplierSku, 'supplierSku', details)
   if (parLevel > 0 && reorderLevel > 0 && parLevel < reorderLevel) {
     details.push('parLevel must be greater than or equal to reorderLevel when both are configured')
   }
@@ -159,6 +168,8 @@ const validateCreatePayload = (payload) => {
       costPerUnit,
       reorderLevel,
       parLevel,
+      preferredSupplierId,
+      supplierSku,
       isActive,
     },
   }
@@ -212,6 +223,12 @@ const validateUpdatePayload = (payload) => {
     const parLevel = normalizeNonNegativeNumber(payload.parLevel, 'parLevel', details)
     if (parLevel !== undefined) value.parLevel = parLevel
   }
+  if (payload.preferredSupplierId !== undefined) {
+    if (payload.preferredSupplierId === null || payload.preferredSupplierId === '') value.preferredSupplierId = null
+    else if (!mongoose.isValidObjectId(payload.preferredSupplierId)) details.push('preferredSupplierId must be a valid supplier id')
+    else value.preferredSupplierId = payload.preferredSupplierId
+  }
+  if (payload.supplierSku !== undefined) value.supplierSku = normalizeOptionalString(payload.supplierSku, 'supplierSku', details)
 
   if (payload.isActive !== undefined) {
     if (typeof payload.isActive !== 'boolean') {
@@ -318,6 +335,14 @@ const ensureValidIngredientId = (res, id) => {
 
 const findActiveRecipeDependencies = (ingredientId) =>
   Recipe.find({ isActive: true, 'ingredients.ingredientId': ingredientId }).select('name').lean()
+
+const validatePreferredSupplier = async (supplierId) => {
+  if (!supplierId) return null
+  const supplier = await Supplier.findById(supplierId).select('isActive').lean()
+  if (!supplier) return 'Preferred supplier not found'
+  if (!supplier.isActive) return 'Preferred supplier must be active'
+  return null
+}
 
 const sendIngredientInUse = (res, dependentRecipes) =>
   sendError(
@@ -588,6 +613,8 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { details, value } = validateCreatePayload(req.body || {})
+    const supplierError = await validatePreferredSupplier(value.preferredSupplierId)
+    if (supplierError) details.push(supplierError)
     if (details.length > 0) {
       return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', details)
     }
@@ -632,6 +659,10 @@ router.put('/:id', async (req, res) => {
     const existing = await Ingredient.findById(req.params.id)
     if (!existing) {
       return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
+    }
+    const supplierError = await validatePreferredSupplier(value.preferredSupplierId)
+    if (supplierError) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', [supplierError])
     }
 
     if (value.unit !== undefined && value.unit !== existing.unit) {

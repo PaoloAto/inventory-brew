@@ -32,6 +32,8 @@ const buildInventoryPlanning = ({ ingredients, transactions, lookbackDays, asOf 
   const transactionsByIngredient = new Map()
 
   for (const transaction of transactions) {
+    const transactionDate = new Date(transaction.createdAt)
+    if (Number.isNaN(transactionDate.getTime()) || transactionDate > currentAsOf) continue
     const ingredientId = String(transaction.ingredientId)
     const existing = transactionsByIngredient.get(ingredientId) || []
     existing.push(transaction)
@@ -85,6 +87,9 @@ const buildInventoryPlanning = ({ ingredients, transactions, lookbackDays, asOf 
       stockQuantity,
       reorderLevel,
       parLevel,
+      preferredSupplier: ingredient.preferredSupplierId
+        ? { id: String(ingredient.preferredSupplierId._id || ingredient.preferredSupplierId), name: ingredient.preferredSupplierId.name || '' }
+        : null,
       stockStatus: calculateStockStatus({ stockQuantity, reorderLevel }),
       historyCoverageDays,
       dataSufficient: historyCoverageDays >= Math.min(7, lookbackDays),

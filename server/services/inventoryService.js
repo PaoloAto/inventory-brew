@@ -302,10 +302,96 @@ const consumeStockBatchInSession = async ({
   return { consumption, transactions, operationId }
 }
 
+// Caller-owned transaction helper for receipt workflows. Keeping this here makes
+// every stock receipt use the same canonical weighted-average cost calculation.
+const receiveStockBatchInSession = async ({
+  session,
+  movements,
+  reason,
+  reasonCode = 'PURCHASE_RECEIPT',
+  referenceType = 'purchase',
+  referenceId,
+  operationId = createOperationId(),
+}) => {
+  const received = []
+
+  for (const movement of movements) {
+    const current = await Ingredient.findById(movement.ingredientId)
+      .select('name unit baseUnit isActive stockQuantity stockQuantityBase costPerUnit averageCostPerBaseUnit')
+      .session(session)
+    if (!current || !current.isActive || current.unit !== movement.unit) {
+      throw createAppError(409, 'STOCK_CHANGED', 'Ingredient is unavailable for this receipt')
+    }
+
+    const quantityBase = convertToBase(movement.quantity, current.unit)
+    const factor = getConversionFactor(current.unit)
+    const currentStockBase = current.stockQuantityBase ?? convertToBase(current.stockQuantity, current.unit)
+    const currentAverageBase =
+      current.averageCostPerBaseUnit ?? costPerDisplayUnitToBase(current.costPerUnit, current.unit)
+    const receiptCostBase = costPerDisplayUnitToBase(movement.unitCost, current.unit)
+    const newAverageExpression = {
+      $divide: [
+        {
+          $add: [
+            { $multiply: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, currentAverageBase] },
+            quantityBase * receiptCostBase,
+          ],
+        },
+        { $add: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, quantityBase] },
+      ],
+    }
+    const previous = await Ingredient.findOneAndUpdate(
+      { _id: current._id, isActive: true, unit: current.unit, baseUnit: getBaseUnit(current.unit) },
+      [
+        {
+          $set: {
+            stockQuantity: { $add: ['$stockQuantity', movement.quantity] },
+            stockQuantityBase: { $add: [{ $ifNull: ['$stockQuantityBase', currentStockBase] }, quantityBase] },
+            averageCostPerBaseUnit: newAverageExpression,
+          },
+        },
+        { $set: { costPerUnit: { $multiply: ['$averageCostPerBaseUnit', factor] } } },
+      ],
+      { new: false, session, updatePipeline: true },
+    )
+    if (!previous) throw createAppError(409, 'STOCK_CHANGED', 'Stock changed while this receipt was being recorded')
+
+    received.push({
+      ingredientId: previous._id,
+      ingredientName: previous.name,
+      unit: current.unit,
+      quantity: movement.quantity,
+      unitCost: movement.unitCost,
+      previousStock: previous.stockQuantity,
+      newStock: previous.stockQuantity + movement.quantity,
+    })
+  }
+
+  const transactions = await InventoryTransaction.insertMany(
+    received.map((entry) => ({
+      ingredientId: entry.ingredientId,
+      type: 'IN',
+      quantity: entry.quantity,
+      deltaQuantity: entry.quantity,
+      previousStock: entry.previousStock,
+      newStock: entry.newStock,
+      reason,
+      reasonCode,
+      unitCost: entry.unitCost,
+      referenceType,
+      referenceId,
+      operationId,
+    })),
+    { session },
+  )
+  return { received, transactions, operationId }
+}
+
 module.exports = {
   createOperationId,
   createIngredientWithInitialStock,
   adjustIngredientStock,
   consumeStockBatchInSession,
+  receiveStockBatchInSession,
   isTransactionUnsupportedError,
 }

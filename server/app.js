@@ -9,6 +9,9 @@ const dashboardRoutes = require('./routes/dashboard')
 const productionRoutes = require('./routes/production')
 const wasteRoutes = require('./routes/waste')
 const planningRoutes = require('./routes/planning')
+const supplierRoutes = require('./routes/suppliers')
+const purchaseOrderRoutes = require('./routes/purchaseOrders')
+const purchaseReceiptRoutes = require('./routes/purchaseReceipts')
 const Ingredient = require('./models/Ingredient')
 const Recipe = require('./models/Recipe')
 
@@ -144,6 +147,9 @@ app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/production', productionRoutes)
 app.use('/api/waste', wasteRoutes)
 app.use('/api/planning', planningRoutes)
+app.use('/api/suppliers', supplierRoutes)
+app.use('/api/purchase-orders', purchaseOrderRoutes)
+app.use('/api/purchase-receipts', purchaseReceiptRoutes)
 
 app.use('/api', (_req, res) => {
   res.status(404).json({

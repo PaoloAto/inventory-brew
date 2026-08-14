@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import SwapVertRoundedIcon from '@mui/icons-material/SwapVertRounded'
 import {
   Box,
@@ -210,6 +211,7 @@ export const PlanningPage = () => {
                   <TableCell align="right">Days remaining</TableCell>
                   <TableCell align="right">Suggested reorder</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -234,6 +236,11 @@ export const PlanningPage = () => {
                             : '—'}
                       </TableCell>
                       <TableCell><StatusLabel label={status.label} tone={status.tone} /></TableCell>
+                      <TableCell align="right">
+                        {item.reorderTriggered ? (
+                          <Button component={Link} to="/purchasing" state={{ prefill: { ingredientId: item.id, quantity: item.suggestedReorderQuantity, supplierId: item.preferredSupplier?.id } }} size="small">Create PO</Button>
+                        ) : null}
+                      </TableCell>
                     </TableRow>
                   )
                 })}

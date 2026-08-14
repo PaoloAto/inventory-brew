@@ -66,6 +66,14 @@ const ingredientSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    preferredSupplierId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Supplier',
+    },
+    supplierSku: {
+      type: String,
+      trim: true,
+    },
     isActive: {
       type: Boolean,
       default: true,

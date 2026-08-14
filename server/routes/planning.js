@@ -54,7 +54,10 @@ router.get('/inventory', async (req, res) => {
         `sortBy must be one of: ${SORT_FIELDS.join(', ')}`,
       ])
     }
-    const sortOrder = req.query.sortOrder === 'desc' ? 'desc' : 'asc'
+    const sortOrder = req.query.sortOrder === undefined ? 'asc' : String(req.query.sortOrder)
+    if (!['asc', 'desc'].includes(sortOrder)) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid planning query', ['sortOrder must be asc or desc'])
+    }
     const search = String(req.query.search || '').trim()
     const category = String(req.query.category || '').trim()
     const reorderOnly = parseBoolean(req.query.reorderOnly) === true
@@ -67,13 +70,15 @@ router.get('/inventory', async (req, res) => {
 
     const asOf = new Date()
     const windowStart = new Date(asOf.getTime() - lookbackDays * 24 * 60 * 60 * 1000)
-    const ingredients = await Ingredient.find(ingredientFilters).lean()
+    const ingredients = await Ingredient.find(ingredientFilters)
+      .populate('preferredSupplierId', 'name isActive')
+      .lean()
     const ingredientIds = ingredients.map((ingredient) => ingredient._id)
     const transactions = ingredientIds.length
       ? await InventoryTransaction.find({
           ingredientId: { $in: ingredientIds },
           type: 'OUT',
-          createdAt: { $gte: windowStart },
+          createdAt: { $gte: windowStart, $lte: asOf },
         }).lean()
       : []
     let results = buildInventoryPlanning({ ingredients, transactions, lookbackDays, asOf })

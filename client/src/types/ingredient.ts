@@ -25,4 +25,6 @@ export interface Ingredient {
   stockStatus: StockStatus
   isActive: boolean
   manufacturer?: string
+  preferredSupplierId?: string | null
+  supplierSku?: string
 }

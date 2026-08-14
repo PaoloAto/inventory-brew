@@ -11,6 +11,7 @@ export interface InventoryPlanningItem {
   stockQuantity: number
   reorderLevel: number
   parLevel: number
+  preferredSupplier: { id: string; name: string } | null
   stockStatus: StockStatus
   historyCoverageDays: number
   dataSufficient: boolean
