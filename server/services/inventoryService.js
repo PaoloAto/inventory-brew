@@ -30,6 +30,61 @@ const createAppError = (status, code, message, details) => {
   return error
 }
 
+const adjustPhysicalCountInSession = async ({
+  session,
+  ingredientId,
+  displayUnit,
+  baseUnit,
+  expectedCurrentStock,
+  expectedCurrentStockBase,
+  newStockQuantity,
+  reason,
+  reasonCode = 'PHYSICAL_COUNT',
+  unitCost,
+  referenceType = 'manual',
+  referenceId,
+  operationId = createOperationId(),
+}) => {
+  const newStockQuantityBase = convertToBase(newStockQuantity, displayUnit)
+  const filter = {
+    _id: ingredientId,
+    isActive: true,
+    unit: displayUnit,
+    baseUnit,
+    stockQuantity: expectedCurrentStock,
+    stockQuantityBase: expectedCurrentStockBase,
+  }
+  const previous = await Ingredient.findOneAndUpdate(
+    filter,
+    { $set: { stockQuantity: newStockQuantity, stockQuantityBase: newStockQuantityBase } },
+    { new: false, session },
+  )
+  if (!previous) {
+    throw await getUnavailableIngredientError({ ingredientId, session, type: 'ADJUST' })
+  }
+
+  const deltaQuantity = newStockQuantity - previous.stockQuantity
+  const [transaction] = await InventoryTransaction.create(
+    [{
+      ingredientId: previous._id,
+      type: 'ADJUST',
+      quantity: Math.abs(deltaQuantity),
+      deltaQuantity,
+      previousStock: previous.stockQuantity,
+      newStock: newStockQuantity,
+      reason,
+      reasonCode,
+      unitCost,
+      referenceType,
+      referenceId,
+      operationId,
+    }],
+    { session },
+  )
+  const ingredient = await Ingredient.findById(previous._id).session(session)
+  return { ingredient, transaction, operationId }
+}
+
 const getUnavailableIngredientError = async ({ ingredientId, session, type }) => {
   const ingredient = await Ingredient.findById(ingredientId)
     .select('isActive stockQuantity stockQuantityBase')
@@ -129,6 +184,23 @@ const adjustIngredientStock = async ({
         current.stockQuantityBase ?? convertToBase(current.stockQuantity, current.unit)
       const currentAverageBase =
         current.averageCostPerBaseUnit ?? costPerDisplayUnitToBase(current.costPerUnit, current.unit)
+
+      if (type === 'ADJUST') {
+        result = await adjustPhysicalCountInSession({
+          session,
+          ingredientId,
+          displayUnit: current.unit,
+          baseUnit: getBaseUnit(current.unit),
+          expectedCurrentStock,
+          expectedCurrentStockBase: currentStockBase,
+          newStockQuantity,
+          reason,
+          reasonCode: reasonCode || 'PHYSICAL_COUNT',
+          unitCost,
+          operationId,
+        })
+        return
+      }
       const filter = { _id: ingredientId, isActive: true, unit: current.unit, baseUnit: expectedBaseUnit }
       let update
       let defaultReasonCode
@@ -171,15 +243,6 @@ const adjustIngredientStock = async ({
         filter.stockQuantityBase = { $gte: quantityBase }
         update = { $inc: { stockQuantity: -quantity, stockQuantityBase: -quantityBase } }
         defaultReasonCode = 'MANUAL_USAGE'
-      } else {
-        filter.stockQuantity = expectedCurrentStock
-        update = {
-          $set: {
-            stockQuantity: newStockQuantity,
-            stockQuantityBase: convertToBase(newStockQuantity, current.unit),
-          },
-        }
-        defaultReasonCode = 'PHYSICAL_COUNT'
       }
 
       const previous = await Ingredient.findOneAndUpdate(filter, update, {
@@ -393,5 +456,6 @@ module.exports = {
   adjustIngredientStock,
   consumeStockBatchInSession,
   receiveStockBatchInSession,
+  adjustPhysicalCountInSession,
   isTransactionUnsupportedError,
 }

@@ -9,6 +9,7 @@ const CookEvent = require('../models/CookEvent')
 const Supplier = require('../models/Supplier')
 const PurchaseOrder = require('../models/PurchaseOrder')
 const PurchaseReceipt = require('../models/PurchaseReceipt')
+const StocktakeSession = require('../models/StocktakeSession')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const {
   getBaseUnit,
@@ -61,6 +62,7 @@ describe('Inventory Brew API integration', () => {
       Supplier.deleteMany({}),
       PurchaseOrder.deleteMany({}),
       PurchaseReceipt.deleteMany({}),
+      StocktakeSession.deleteMany({}),
     ])
   })
 
@@ -265,6 +267,179 @@ describe('Inventory Brew API integration', () => {
     expect(costPerDisplayUnitToBase(120, 'kg')).toBe(0.12)
     expect(costPerBaseUnitToDisplay(0.12, 'kg')).toBe(120)
     expect(() => convertToBase(1, 'box')).toThrow('Unknown unit')
+  })
+
+  test('Stock Count start snapshots active display and canonical quantities without inventory movement', async () => {
+    await Ingredient.create([
+      { name: 'Chicken', category: 'Protein', unit: 'kg', stockQuantity: 10, costPerUnit: 180 },
+      { name: 'Eggs', unit: 'pcs', stockQuantity: 30, costPerUnit: 8 },
+      { name: 'Archived rice', unit: 'kg', stockQuantity: 20, costPerUnit: 60, isActive: false },
+    ])
+    const before = await Ingredient.find().sort({ name: 1 }).lean()
+    const ledgerCount = await InventoryTransaction.countDocuments()
+
+    const response = await request(app).post('/api/stocktakes').send({ name: 'Weekly count', notes: 'Close' })
+
+    expect(response.status).toBe(201)
+    expect(response.body.status).toBe('DRAFT')
+    expect(response.body.operationId).toBeNull()
+    expect(response.body.lines).toHaveLength(2)
+    expect(response.body.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ingredientNameSnapshot: 'Chicken', categorySnapshot: 'Protein', unit: 'kg', baseUnit: 'g', expectedStockQuantitySnapshot: 10, expectedStockQuantityBaseSnapshot: 10000, countedQuantity: null }),
+      expect.objectContaining({ ingredientNameSnapshot: 'Eggs', unit: 'pcs', baseUnit: 'pcs', expectedStockQuantitySnapshot: 30, expectedStockQuantityBaseSnapshot: 30, countedQuantity: null }),
+    ]))
+    expect(await Ingredient.find().sort({ name: 1 }).lean()).toEqual(before)
+    expect(await InventoryTransaction.countDocuments()).toBe(ledgerCount)
+  })
+
+  test('Stock Count drafts preserve null versus zero and reject strings without changing stock', async () => {
+    const ingredients = await Ingredient.create([
+      { name: 'Draft flour', unit: 'kg', stockQuantity: 4, costPerUnit: 20 },
+      { name: 'Draft eggs', unit: 'pcs', stockQuantity: 12, costPerUnit: 2 },
+    ])
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Draft validation' })
+    const response = await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [
+      { ingredientId: String(ingredients[0]._id), countedQuantity: 0 },
+      { ingredientId: String(ingredients[1]._id), countedQuantity: null },
+    ] })
+    expect(response.status).toBe(200)
+    const byId = new Map(response.body.lines.map((line) => [line.ingredientId, line.countedQuantity]))
+    expect(byId.get(String(ingredients[0]._id))).toBe(0)
+    expect(byId.get(String(ingredients[1]._id))).toBeNull()
+    for (const invalid of ['9.5', '']) {
+      const rejected = await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [{ ingredientId: String(ingredients[1]._id), countedQuantity: invalid }] })
+      expect(rejected.status).toBe(400)
+      expect(rejected.body.error.code).toBe('VALIDATION_ERROR')
+    }
+    expect((await Ingredient.findById(ingredients[0]._id)).stockQuantity).toBe(4)
+    expect(await InventoryTransaction.countDocuments()).toBe(0)
+  })
+
+  test('Stock Count cannot finish with an uncounted item while explicit zero is complete', async () => {
+    const ingredients = await Ingredient.create([
+      { name: 'Zero item', unit: 'pcs', stockQuantity: 2, costPerUnit: 1 },
+      { name: 'Blank item', unit: 'pcs', stockQuantity: 3, costPerUnit: 1 },
+    ])
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Incomplete count' })
+    await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [
+      { ingredientId: String(ingredients[0]._id), countedQuantity: 0 },
+      { ingredientId: String(ingredients[1]._id), countedQuantity: null },
+    ] })
+    const response = await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('STOCKTAKE_INCOMPLETE')
+    expect(response.body.error.details).toEqual([expect.objectContaining({ ingredientName: 'Blank item' })])
+    expect((await StocktakeSession.findById(started.body._id)).status).toBe('DRAFT')
+    expect(await InventoryTransaction.countDocuments()).toBe(0)
+  })
+
+  test('Stock Count posts kg and pcs acceptance fixture with signed immutable economics and two ledger rows', async () => {
+    const ingredients = await Ingredient.create([
+      { name: 'Chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 180 },
+      { name: 'Rice', unit: 'kg', stockQuantity: 20, costPerUnit: 60 },
+      { name: 'Eggs', unit: 'pcs', stockQuantity: 30, costPerUnit: 8 },
+    ])
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Acceptance count' })
+    await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [
+      { ingredientId: String(ingredients[0]._id), countedQuantity: 9 },
+      { ingredientId: String(ingredients[1]._id), countedQuantity: 20 },
+      { ingredientId: String(ingredients[2]._id), countedQuantity: 32 },
+    ] })
+    const posted = await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()
+    expect(posted.status).toBe(200)
+    expect(posted.body.status).toBe('POSTED')
+    expect(posted.body.operationId).toEqual(expect.any(String))
+    const lines = new Map(posted.body.lines.map((line) => [line.ingredientNameSnapshot, line]))
+    expect(lines.get('Chicken')).toMatchObject({ countedQuantity: 9, countedQuantityBase: 9000, varianceQuantity: -1, varianceQuantityBase: -1000, unitCostSnapshot: 180, varianceValue: -180 })
+    expect(lines.get('Rice')).toMatchObject({ countedQuantity: 20, countedQuantityBase: 20000, varianceQuantity: 0, varianceQuantityBase: 0, unitCostSnapshot: 60, varianceValue: 0 })
+    expect(lines.get('Eggs')).toMatchObject({ countedQuantity: 32, countedQuantityBase: 32, varianceQuantity: 2, varianceQuantityBase: 2, unitCostSnapshot: 8, varianceValue: 16 })
+    expect(posted.body.summary).toMatchObject({ lineCount: 3, varianceLineCount: 2, shortageLineCount: 1, overageLineCount: 1, netVarianceValue: -164, absoluteVarianceValue: 196 })
+    const final = await Ingredient.find().sort({ name: 1 }).lean()
+    expect(final.find((item) => item.name === 'Chicken')).toMatchObject({ stockQuantity: 9, stockQuantityBase: 9000 })
+    expect(final.find((item) => item.name === 'Rice')).toMatchObject({ stockQuantity: 20, stockQuantityBase: 20000 })
+    expect(final.find((item) => item.name === 'Eggs')).toMatchObject({ stockQuantity: 32, stockQuantityBase: 32 })
+    const ledger = await InventoryTransaction.find({ referenceType: 'stocktake', referenceId: started.body._id }).lean()
+    expect(ledger).toHaveLength(2)
+    expect(new Set(ledger.map((entry) => entry.operationId))).toEqual(new Set([posted.body.operationId]))
+    expect(ledger).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'ADJUST', reasonCode: 'PHYSICAL_COUNT', quantity: 1, deltaQuantity: -1, previousStock: 10, newStock: 9 }),
+      expect.objectContaining({ type: 'ADJUST', reasonCode: 'PHYSICAL_COUNT', quantity: 2, deltaQuantity: 2, previousStock: 30, newStock: 32 }),
+    ]))
+  })
+
+  test('Stock Count detects canonical stale stock and applies none of its adjustments', async () => {
+    const ingredients = await Ingredient.create([
+      { name: 'Conflict chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 180 },
+      { name: 'Unaffected eggs', unit: 'pcs', stockQuantity: 30, costPerUnit: 8 },
+    ])
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Stale count' })
+    await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [
+      { ingredientId: String(ingredients[0]._id), countedQuantity: 9 },
+      { ingredientId: String(ingredients[1]._id), countedQuantity: 28 },
+    ] })
+    await request(app).post(`/api/ingredients/${ingredients[0]._id}/adjust-stock`).send({ type: 'IN', quantity: 5, reason: 'Delivery' })
+    const beforeStocktakeLedger = await InventoryTransaction.countDocuments()
+    const response = await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('STOCKTAKE_CONFLICT')
+    expect(response.body.error.details).toEqual([expect.objectContaining({ ingredientName: 'Conflict chicken', expectedQuantity: 10, currentQuantity: 15, unit: 'kg' })])
+    expect(await InventoryTransaction.countDocuments()).toBe(beforeStocktakeLedger)
+    expect(await Ingredient.findById(ingredients[0]._id).lean()).toMatchObject({ stockQuantity: 15, stockQuantityBase: 15000 })
+    expect(await Ingredient.findById(ingredients[1]._id).lean()).toMatchObject({ stockQuantity: 30, stockQuantityBase: 30 })
+    expect((await StocktakeSession.findById(started.body._id)).status).toBe('DRAFT')
+  })
+
+  test('Stock Count finalization failure rolls back display/base stock, ledger, and session state', async () => {
+    const ingredient = await Ingredient.create({ name: 'Rollback chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 180 })
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Rollback count' })
+    await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [{ ingredientId: String(ingredient._id), countedQuantity: 9 }] })
+    const originalSave = StocktakeSession.prototype.save
+    const saveSpy = jest.spyOn(StocktakeSession.prototype, 'save').mockImplementation(function mockedSave(options) {
+      if (this.status === 'POSTED') return Promise.reject(new Error('forced stocktake finalization failure'))
+      return originalSave.call(this, options)
+    })
+    try {
+      const response = await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()
+      expect(response.status).toBe(500)
+      expect(await Ingredient.findById(ingredient._id).lean()).toMatchObject({ stockQuantity: 10, stockQuantityBase: 10000 })
+      expect(await InventoryTransaction.countDocuments({ referenceType: 'stocktake' })).toBe(0)
+      expect(await StocktakeSession.findById(started.body._id).lean()).toMatchObject({ status: 'DRAFT', operationId: null, postedAt: null })
+    } finally {
+      saveSpy.mockRestore()
+    }
+  })
+
+  test('Stock Count completed detail remains an immutable name, quantity, cost, and difference snapshot', async () => {
+    const ingredient = await Ingredient.create({ name: 'Historical chicken', category: 'Protein', unit: 'kg', stockQuantity: 10, costPerUnit: 180 })
+    const started = await request(app).post('/api/stocktakes').send({ name: 'Historical count' })
+    await request(app).put(`/api/stocktakes/${started.body._id}`).send({ counts: [{ ingredientId: String(ingredient._id), countedQuantity: 9 }] })
+    expect((await request(app).post(`/api/stocktakes/${started.body._id}/post`).send()).status).toBe(200)
+    await Ingredient.updateOne({ _id: ingredient._id }, { $set: { name: 'Renamed chicken', category: 'Other', costPerUnit: 999, stockQuantity: 22, stockQuantityBase: 22000 } })
+    const detail = await request(app).get(`/api/stocktakes/${started.body._id}`)
+    expect(detail.status).toBe(200)
+    expect(detail.body.lines[0]).toMatchObject({ ingredientNameSnapshot: 'Historical chicken', categorySnapshot: 'Protein', unit: 'kg', baseUnit: 'g', expectedStockQuantitySnapshot: 10, expectedStockQuantityBaseSnapshot: 10000, countedQuantity: 9, countedQuantityBase: 9000, varianceQuantity: -1, varianceQuantityBase: -1000, unitCostSnapshot: 180, varianceValue: -180 })
+  })
+
+  test('Stock Count posted and cancelled sessions are read-only across lifecycle actions', async () => {
+    const ingredient = await Ingredient.create({ name: 'Lifecycle item', unit: 'pcs', stockQuantity: 2, costPerUnit: 1 })
+    const completed = await request(app).post('/api/stocktakes').send({ name: 'Completed lifecycle' })
+    await request(app).put(`/api/stocktakes/${completed.body._id}`).send({ counts: [{ ingredientId: String(ingredient._id), countedQuantity: 2 }] })
+    await request(app).post(`/api/stocktakes/${completed.body._id}/post`).send()
+    for (const response of [
+      await request(app).put(`/api/stocktakes/${completed.body._id}`).send({ counts: [] }),
+      await request(app).post(`/api/stocktakes/${completed.body._id}/post`).send(),
+      await request(app).post(`/api/stocktakes/${completed.body._id}/cancel`).send(),
+    ]) expect(response.status).toBe(409)
+    const cancelled = await request(app).post('/api/stocktakes').send({ name: 'Cancelled lifecycle' })
+    expect((await request(app).post(`/api/stocktakes/${cancelled.body._id}/cancel`).send()).status).toBe(200)
+    expect((await request(app).put(`/api/stocktakes/${cancelled.body._id}`).send({ counts: [] })).status).toBe(409)
+    expect((await request(app).post(`/api/stocktakes/${cancelled.body._id}/post`).send()).status).toBe(409)
+    const list = await request(app).get('/api/stocktakes?sortOrder=desc&page=1&limit=10')
+    expect(list.status).toBe(200)
+    expect(list.body.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Completed lifecycle', status: 'POSTED', lineCount: 1, countedLineCount: 1 }),
+      expect.objectContaining({ name: 'Cancelled lifecycle', status: 'CANCELLED', lineCount: 1, countedLineCount: 0 }),
+    ]))
   })
 
   test('transaction-unavailable handling is consistent for ingredient creation and adjustment', async () => {
