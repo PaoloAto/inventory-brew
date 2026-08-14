@@ -61,18 +61,21 @@ export const ReceivePurchaseOrderDialog = ({
   )
 
   const getValidationMessage = () => {
+    let selectedLineCount = 0
     for (const line of parsedLines) {
-      if (line.parsedQuantity === null || !Number.isFinite(line.parsedQuantity) || line.parsedQuantity <= 0) {
+      if (line.parsedQuantity === null || line.parsedQuantity === 0) continue
+      if (!Number.isFinite(line.parsedQuantity) || line.parsedQuantity < 0) {
         return 'Enter a positive quantity for every receipt line.'
       }
+      selectedLineCount += 1
       if (!withinRemaining(line.parsedQuantity, line.remaining)) {
         return 'Receive quantity cannot exceed the remaining order quantity.'
       }
       if (line.parsedUnitCost === null || !Number.isFinite(line.parsedUnitCost) || line.parsedUnitCost < 0) {
-        return 'Enter an actual unit cost for every receipt line. Zero is allowed.'
+        return 'Enter an actual unit cost for each item being received. Zero is allowed.'
       }
     }
-    return ''
+    return selectedLineCount === 0 ? 'No receipt quantities entered.' : ''
   }
 
   const currentValidation = getValidationMessage()
@@ -80,7 +83,7 @@ export const ReceivePurchaseOrderDialog = ({
   const receiptValue = parsedLines.reduce(
     (total, line) =>
       total +
-      (line.parsedQuantity !== null && Number.isFinite(line.parsedQuantity) &&
+      (line.parsedQuantity !== null && line.parsedQuantity > 0 && Number.isFinite(line.parsedQuantity) &&
       line.parsedUnitCost !== null && Number.isFinite(line.parsedUnitCost)
         ? line.parsedQuantity * line.parsedUnitCost
         : 0),
@@ -101,7 +104,7 @@ export const ReceivePurchaseOrderDialog = ({
       return
     }
     onSave({
-      items: parsedLines.map((line) => ({
+      items: parsedLines.filter((line) => line.parsedQuantity !== null && line.parsedQuantity > 0).map((line) => ({
         purchaseOrderItemId: line.id,
         quantity: line.parsedQuantity as number,
         unitCost: line.parsedUnitCost as number,

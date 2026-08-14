@@ -15,7 +15,7 @@ import {
   TextField,
 } from '@mui/material'
 import { useLocation } from 'react-router-dom'
-import { getErrorMessage } from '../../api/error'
+import { getErrorCode, getErrorMessage } from '../../api/error'
 import { listIngredients } from '../../api/ingredients'
 import {
   cancelPurchaseOrder,
@@ -223,6 +223,15 @@ export const PurchasingPage = () => {
       showSnackbar('Purchase receipt recorded', { severity: 'success' })
       await Promise.all([loadOrders(), loadReceipts()])
     } catch (error) {
+      if (getErrorCode(error) === 'RECEIPT_CONFLICT') {
+        setReceiving(null)
+        setDetails(null)
+        await Promise.all([loadOrders(), loadReceipts()])
+        showSnackbar('Purchase order changed while you were receiving it. Current quantities have been refreshed.', {
+          severity: 'warning',
+        })
+        return
+      }
       showSnackbar(getErrorMessage(error, 'Failed to receive purchase order'), { severity: 'error' })
     } finally {
       setSaving(false)

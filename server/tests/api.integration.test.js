@@ -1859,4 +1859,58 @@ describe('Inventory Brew API integration', () => {
     expect(invertedOrders.status).toBe(400)
     expect(invertedReceipts.status).toBe(400)
   })
+
+  test('purchase receipts can receive selected PO lines without touching skipped lines', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Selected lines supplier' })
+    const chicken = await request(app).post('/api/ingredients').send({ name: 'Selected chicken', unit: 'kg', stockQuantity: 10, costPerUnit: 50 })
+    const oil = await request(app).post('/api/ingredients').send({ name: 'Selected oil', unit: 'l', stockQuantity: 5, costPerUnit: 30 })
+    const draft = await request(app).post('/api/purchase-orders').send({
+      supplierId: supplier.body._id,
+      items: [
+        { ingredientId: chicken.body._id, orderedQuantity: 10, expectedUnitCost: 100 },
+        { ingredientId: oil.body._id, orderedQuantity: 5, expectedUnitCost: 40 },
+      ],
+    })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const chickenLine = ordered.body.items.find((item) => item.ingredientId === chicken.body._id)
+    const oilLine = ordered.body.items.find((item) => item.ingredientId === oil.body._id)
+
+    const receipt = await request(app)
+      .post(`/api/purchase-orders/${draft.body._id}/receive`)
+      .send({ items: [{ purchaseOrderItemId: chickenLine._id, quantity: 4, unitCost: 100 }] })
+
+    expect(receipt.status).toBe(200)
+    expect(receipt.body.purchaseOrder.status).toBe('PARTIALLY_RECEIVED')
+    expect(receipt.body.purchaseOrder.items.find((item) => item._id === chickenLine._id).receivedQuantity).toBe(4)
+    expect(receipt.body.purchaseOrder.items.find((item) => item._id === oilLine._id).receivedQuantity).toBe(0)
+    expect((await Ingredient.findById(chicken.body._id)).stockQuantity).toBeCloseTo(14)
+    expect((await Ingredient.findById(oil.body._id)).stockQuantity).toBeCloseTo(5)
+    expect(await InventoryTransaction.countDocuments({ operationId: receipt.body.operationId, reasonCode: 'PURCHASE_RECEIPT' })).toBe(1)
+    expect(receipt.body.purchaseReceipt.items).toHaveLength(1)
+    expect(String(receipt.body.purchaseReceipt.items[0].ingredientId)).toBe(chicken.body._id)
+  })
+
+  test('purchase receipt inputs require explicit numeric values while numeric zero cost remains valid', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Strict receipt supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Strict receipt ingredient', unit: 'kg', stockQuantity: 2, costPerUnit: 10 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 2, expectedUnitCost: 10 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const lineId = ordered.body.items[0]._id
+    const beforeStock = (await Ingredient.findById(ingredient.body._id)).stockQuantity
+
+    const blankCost = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: lineId, quantity: 1, unitCost: '' }] })
+    const stringQuantity = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: lineId, quantity: '1', unitCost: 0 }] })
+    expect(blankCost.status).toBe(400)
+    expect(stringQuantity.status).toBe(400)
+    expect(blankCost.body.error.code).toBe('VALIDATION_ERROR')
+    expect(stringQuantity.body.error.code).toBe('VALIDATION_ERROR')
+    expect((await Ingredient.findById(ingredient.body._id)).stockQuantity).toBe(beforeStock)
+    expect(await InventoryTransaction.countDocuments({ reasonCode: 'PURCHASE_RECEIPT' })).toBe(0)
+    expect(await PurchaseReceipt.countDocuments()).toBe(0)
+    expect((await PurchaseOrder.findById(draft.body._id)).items[0].receivedQuantity).toBe(0)
+
+    const zeroCost = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: lineId, quantity: 1, unitCost: 0 }] })
+    expect(zeroCost.status).toBe(200)
+    expect(zeroCost.body.purchaseReceipt.items[0].unitCost).toBe(0)
+  })
 })
