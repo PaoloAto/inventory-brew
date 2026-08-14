@@ -87,7 +87,7 @@ const buildInventoryPlanning = ({ ingredients, transactions, lookbackDays, asOf 
       stockQuantity,
       reorderLevel,
       parLevel,
-      preferredSupplier: ingredient.preferredSupplierId
+      preferredSupplier: ingredient.preferredSupplierId?.isActive === true
         ? { id: String(ingredient.preferredSupplierId._id || ingredient.preferredSupplierId), name: ingredient.preferredSupplierId.name || '' }
         : null,
       stockStatus: calculateStockStatus({ stockQuantity, reorderLevel }),

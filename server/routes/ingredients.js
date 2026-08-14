@@ -660,9 +660,15 @@ router.put('/:id', async (req, res) => {
     if (!existing) {
       return sendError(res, 404, 'NOT_FOUND', 'Ingredient not found')
     }
-    const supplierError = await validatePreferredSupplier(value.preferredSupplierId)
-    if (supplierError) {
-      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', [supplierError])
+    const supplierWasChanged =
+      value.preferredSupplierId !== undefined &&
+      value.preferredSupplierId !== null &&
+      String(value.preferredSupplierId) !== String(existing.preferredSupplierId || '')
+    if (supplierWasChanged) {
+      const supplierError = await validatePreferredSupplier(value.preferredSupplierId)
+      if (supplierError) {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid ingredient payload', [supplierError])
+      }
     }
 
     if (value.unit !== undefined && value.unit !== existing.unit) {

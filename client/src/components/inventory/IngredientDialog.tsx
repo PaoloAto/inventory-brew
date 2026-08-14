@@ -98,6 +98,10 @@ export const IngredientDialog = ({
   }
 
   const mode = initialData ? 'Edit' : 'Add'
+  const currentSupplier = initialData?.preferredSupplierId
+    ? suppliers.find((supplier) => supplier._id === initialData.preferredSupplierId)
+    : undefined
+  const activeSuppliers = suppliers.filter((supplier) => supplier.isActive)
 
   return (
     <Dialog
@@ -202,7 +206,19 @@ export const IngredientDialog = ({
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField select label="Preferred supplier" value={values.preferredSupplierId ?? ''} onChange={(e) => handleChange('preferredSupplierId', e.target.value)} fullWidth helperText="Optional default supplier for purchasing.">
               <MenuItem value="">None</MenuItem>
-              {suppliers.map((supplier) => <MenuItem key={supplier._id} value={supplier._id}>{supplier.name}</MenuItem>)}
+              {currentSupplier && !currentSupplier.isActive ? (
+                <MenuItem value={currentSupplier._id} disabled>
+                  {currentSupplier.name} (Archived)
+                </MenuItem>
+              ) : null}
+              {initialData?.preferredSupplierId && !currentSupplier ? (
+                <MenuItem value={initialData.preferredSupplierId} disabled>
+                  Preferred supplier (Archived)
+                </MenuItem>
+              ) : null}
+              {activeSuppliers.map((supplier) => (
+                <MenuItem key={supplier._id} value={supplier._id}>{supplier.name}</MenuItem>
+              ))}
             </TextField>
           </Grid>
           <Grid size={{ xs: 12, sm: 6 }}>

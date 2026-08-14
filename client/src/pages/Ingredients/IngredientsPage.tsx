@@ -168,7 +168,12 @@ export const IngredientsPage = () => {
       let totalPages = 1
       try {
         do {
-          const response = await listSuppliers({ page: supplierPage, limit: 100, sortOrder: 'asc' })
+          const response = await listSuppliers({
+            includeInactive: true,
+            page: supplierPage,
+            limit: 100,
+            sortOrder: 'asc',
+          })
           catalog.push(...response.items)
           totalPages = response.pagination.totalPages
           supplierPage += 1

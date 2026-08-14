@@ -1734,16 +1734,129 @@ describe('Inventory Brew API integration', () => {
     expect(receipts.body.items.flatMap((receipt) => receipt.items).map((line) => line.ingredientNameSnapshot)).toContain('Receipt chicken')
   })
 
-  test('over-receipt leaves order quantities, stock, ledger and receipts unchanged', async () => {
-    const supplier = await request(app).post('/api/suppliers').send({ name: 'Guard supplier' })
-    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Guard rice', unit: 'kg', stockQuantity: 1, costPerUnit: 5 })
-    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 2, expectedUnitCost: 5 }] })
+  test('decimal partial receipts normalize exact completion while meaningful over-receipt remains rejected', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Decimal supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Decimal spice', unit: 'kg', stockQuantity: 1, costPerUnit: 5 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 0.3, expectedUnitCost: 5 }] })
     const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
-    const rejected = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: ordered.body.items[0]._id, quantity: 3, unitCost: 5 }] })
+    const itemId = ordered.body.items[0]._id
+
+    const first = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 0.1, unitCost: 5 }] })
+    expect(first.status).toBe(200)
+    expect(first.body.purchaseOrder.status).toBe('PARTIALLY_RECEIVED')
+    expect(first.body.purchaseOrder.items[0].receivedQuantity).toBeCloseTo(0.1)
+
+    const second = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 0.2, unitCost: 5 }] })
+    expect(second.status).toBe(200)
+    expect(second.body.purchaseOrder.status).toBe('RECEIVED')
+    expect(second.body.purchaseOrder.items[0].receivedQuantity).toBe(0.3)
+    expect(second.body.purchaseOrder.items[0].remainingQuantity).toBe(0)
+    expect((await Ingredient.findById(ingredient.body._id)).stockQuantity).toBeCloseTo(1.3)
+
+    const extraDraft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 0.3, expectedUnitCost: 5 }] })
+    const extraOrdered = await request(app).post(`/api/purchase-orders/${extraDraft.body._id}/order`)
+    const extraItemId = extraOrdered.body.items[0]._id
+    await request(app).post(`/api/purchase-orders/${extraDraft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: extraItemId, quantity: 0.1, unitCost: 5 }] })
+    const rejected = await request(app).post(`/api/purchase-orders/${extraDraft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: extraItemId, quantity: 0.201, unitCost: 5 }] })
     expect(rejected.status).toBe(409)
     expect(rejected.body.error.code).toBe('RECEIPT_CONFLICT')
-    expect((await Ingredient.findById(ingredient.body._id)).stockQuantity).toBe(1)
-    expect(await InventoryTransaction.countDocuments({ reasonCode: 'PURCHASE_RECEIPT' })).toBe(0)
-    expect(await PurchaseReceipt.countDocuments()).toBe(0)
+    expect((await PurchaseOrder.findById(extraDraft.body._id)).items[0].receivedQuantity).toBeCloseTo(0.1)
+  })
+
+  test('PurchaseReceipt failure rolls stock, canonical cost, PO, and ledger back together', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Rollback supplier' })
+    const ingredientResponse = await request(app).post('/api/ingredients').send({ name: 'Rollback purchase stock', unit: 'kg', stockQuantity: 10, costPerUnit: 100 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredientResponse.body._id, orderedQuantity: 5, expectedUnitCost: 150 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const beforeIngredient = await Ingredient.findById(ingredientResponse.body._id).lean()
+    const receiptCount = await PurchaseReceipt.countDocuments()
+    const ledgerCount = await InventoryTransaction.countDocuments({ reasonCode: 'PURCHASE_RECEIPT' })
+    const receiptSpy = jest.spyOn(PurchaseReceipt, 'create').mockRejectedValueOnce(new Error('forced receipt failure'))
+
+    try {
+      const response = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: ordered.body.items[0]._id, quantity: 5, unitCost: 160 }] })
+      expect(response.status).toBe(500)
+      expect(response.body.error.code).toBe('INTERNAL_SERVER_ERROR')
+    } finally {
+      receiptSpy.mockRestore()
+    }
+
+    const afterIngredient = await Ingredient.findById(ingredientResponse.body._id).lean()
+    expect(afterIngredient).toMatchObject({
+      stockQuantity: beforeIngredient.stockQuantity,
+      stockQuantityBase: beforeIngredient.stockQuantityBase,
+      costPerUnit: beforeIngredient.costPerUnit,
+      averageCostPerBaseUnit: beforeIngredient.averageCostPerBaseUnit,
+    })
+    const afterOrder = await PurchaseOrder.findById(draft.body._id).lean()
+    expect(afterOrder.status).toBe('ORDERED')
+    expect(afterOrder.items[0].receivedQuantity).toBe(0)
+    expect(await InventoryTransaction.countDocuments({ reasonCode: 'PURCHASE_RECEIPT' })).toBe(ledgerCount)
+    expect(await PurchaseReceipt.countDocuments()).toBe(receiptCount)
+  })
+
+  test('concurrent final receipts commit the remaining quantity exactly once', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Concurrent PO supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Concurrent PO stock', unit: 'kg', stockQuantity: 10, costPerUnit: 100 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 10, expectedUnitCost: 150 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const itemId = ordered.body.items[0]._id
+    await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 6, unitCost: 160 }] })
+
+    const responses = await Promise.all([1, 2].map(() => request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: itemId, quantity: 4, unitCost: 170 }] })))
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1)
+    const conflict = responses.find((response) => response.status !== 200)
+    expect(conflict.status).toBe(409)
+    expect(conflict.body.error.code).toBe('RECEIPT_CONFLICT')
+
+    const finalOrder = await PurchaseOrder.findById(draft.body._id).lean()
+    expect(finalOrder.status).toBe('RECEIVED')
+    expect(finalOrder.items[0].receivedQuantity).toBe(10)
+    expect((await Ingredient.findById(ingredient.body._id)).stockQuantity).toBeCloseTo(20)
+    expect(await PurchaseReceipt.countDocuments({ purchaseOrderId: draft.body._id })).toBe(2)
+    expect(await InventoryTransaction.countDocuments({ referenceId: draft.body._id, reasonCode: 'PURCHASE_RECEIPT' })).toBe(2)
+  })
+
+  test('archived preferred suppliers are hidden from planning but unchanged references can remain or be cleared', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Archived planning supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Archived supplier ingredient', unit: 'kg', stockQuantity: 1, costPerUnit: 10, reorderLevel: 2, parLevel: 5, preferredSupplierId: supplier.body._id })
+    await request(app).delete(`/api/suppliers/${supplier.body._id}`)
+
+    const planning = await request(app).get('/api/planning/inventory').query({ search: 'Archived supplier ingredient' })
+    expect(planning.status).toBe(200)
+    expect(planning.body.items[0].preferredSupplier).toBeNull()
+
+    const unchanged = await request(app).put(`/api/ingredients/${ingredient.body._id}`).send({ name: 'Archived supplier ingredient updated', preferredSupplierId: supplier.body._id })
+    expect(unchanged.status).toBe(200)
+    expect(String(unchanged.body.preferredSupplierId)).toBe(supplier.body._id)
+
+    const newlyAssignedIngredient = await request(app).post('/api/ingredients').send({ name: 'No supplier ingredient', unit: 'kg', stockQuantity: 0, costPerUnit: 1 })
+    const rejected = await request(app).put(`/api/ingredients/${newlyAssignedIngredient.body._id}`).send({ preferredSupplierId: supplier.body._id })
+    expect(rejected.status).toBe(400)
+
+    const cleared = await request(app).put(`/api/ingredients/${ingredient.body._id}`).send({ preferredSupplierId: null })
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.preferredSupplierId).toBeNull()
+  })
+
+  test('purchase order and receipt date-only filters include the full day and reject inverted ranges', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Date supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({ name: 'Date ingredient', unit: 'pcs', stockQuantity: 1, costPerUnit: 2 })
+    const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 1, expectedUnitCost: 2 }] })
+    const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
+    const received = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: ordered.body.items[0]._id, quantity: 1, unitCost: 2 }] })
+    await PurchaseOrder.findByIdAndUpdate(draft.body._id, { createdAt: new Date('2026-08-14T23:30:00.000Z') }, { timestamps: false })
+    await PurchaseReceipt.findByIdAndUpdate(received.body.purchaseReceipt._id, { receivedAt: new Date('2026-08-14T23:45:00.000Z') })
+
+    const orders = await request(app).get('/api/purchase-orders').query({ dateFrom: '2026-08-14', dateTo: '2026-08-14' })
+    expect(orders.status).toBe(200)
+    expect(orders.body.items.map((item) => item._id)).toContain(draft.body._id)
+    const receipts = await request(app).get('/api/purchase-receipts').query({ dateFrom: '2026-08-14', dateTo: '2026-08-14' })
+    expect(receipts.status).toBe(200)
+    expect(receipts.body.items.map((item) => item._id)).toContain(received.body.purchaseReceipt._id)
+    const invertedOrders = await request(app).get('/api/purchase-orders').query({ dateFrom: '2026-08-15', dateTo: '2026-08-14' })
+    const invertedReceipts = await request(app).get('/api/purchase-receipts').query({ dateFrom: '2026-08-15', dateTo: '2026-08-14' })
+    expect(invertedOrders.status).toBe(400)
+    expect(invertedReceipts.status).toBe(400)
   })
 })

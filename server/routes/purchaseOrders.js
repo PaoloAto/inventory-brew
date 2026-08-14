@@ -13,6 +13,16 @@ const sendError = (res, status, code, message, details) => res.status(status).js
 const validId = (res, id, label = 'purchase order') => mongoose.isValidObjectId(id) || (sendError(res, 400, 'INVALID_ID', `Invalid ${label} id`), false)
 const escapeRegExp = (input) => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const parsePositiveInt = (value, fallback, max) => { if (value === undefined) return fallback; const parsed = Number(value); return Number.isInteger(parsed) && parsed >= 1 && (!max || parsed <= max) ? parsed : null }
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const parseDate = (value, boundary) => {
+  if (!value) return undefined
+  const normalized = String(value).trim()
+  const dateOnly = DATE_ONLY_PATTERN.test(normalized)
+  const date = new Date(dateOnly ? `${normalized}T${boundary === 'end' ? '23:59:59.999' : '00:00:00.000'}Z` : normalized)
+  if (Number.isNaN(date.getTime())) return undefined
+  if (dateOnly && date.toISOString().slice(0, 10) !== normalized) return undefined
+  return date
+}
 const formatOrder = (order) => ({
   ...order.toObject ? order.toObject() : order,
   items: order.items.map((item) => ({ ...(item.toObject ? item.toObject() : item), remainingQuantity: Math.max(0, item.orderedQuantity - item.receivedQuantity) })),
@@ -59,7 +69,21 @@ router.get('/', async (req, res) => {
     if (req.query.supplierId) { if (!mongoose.isValidObjectId(req.query.supplierId)) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['supplierId must be valid']); filter.supplierId = req.query.supplierId }
     if (req.query.status) { if (!['DRAFT', 'ORDERED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].includes(req.query.status)) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['Invalid status']); filter.status = req.query.status }
     const search = String(req.query.search || '').trim(); if (search) filter.$or = [{ orderNumber: new RegExp(escapeRegExp(search), 'i') }, { supplierNameSnapshot: new RegExp(escapeRegExp(search), 'i') }]
-    const dateFilter = {}; if (req.query.dateFrom) dateFilter.$gte = new Date(req.query.dateFrom); if (req.query.dateTo) dateFilter.$lte = new Date(req.query.dateTo); if (Object.keys(dateFilter).length) { if (Object.values(dateFilter).some((date) => Number.isNaN(date.getTime()))) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['Invalid date range']); filter.createdAt = dateFilter }
+    const dateFilter = {}
+    if (req.query.dateFrom) {
+      const dateFrom = parseDate(req.query.dateFrom, 'start')
+      if (!dateFrom) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['dateFrom must be a valid date'])
+      dateFilter.$gte = dateFrom
+    }
+    if (req.query.dateTo) {
+      const dateTo = parseDate(req.query.dateTo, 'end')
+      if (!dateTo) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['dateTo must be a valid date'])
+      dateFilter.$lte = dateTo
+    }
+    if (dateFilter.$gte && dateFilter.$lte && dateFilter.$gte > dateFilter.$lte) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['dateFrom must be earlier than or equal to dateTo'])
+    }
+    if (Object.keys(dateFilter).length) filter.createdAt = dateFilter
     const direction = req.query.sortOrder === 'asc' ? 1 : req.query.sortOrder === 'desc' || req.query.sortOrder === undefined ? -1 : null; if (!direction) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid purchase order query', ['sortOrder must be asc or desc'])
     const [items, total] = await Promise.all([PurchaseOrder.find(filter).sort({ createdAt: direction }).skip((page - 1) * limit).limit(limit), PurchaseOrder.countDocuments(filter)])
     return res.json({ items: items.map(formatOrder), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } })
