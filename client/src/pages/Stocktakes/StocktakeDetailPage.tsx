@@ -160,6 +160,7 @@ export const StocktakeDetailPage = () => {
       setMessage({ severity: 'success', text: 'Stock Count completed. Inventory is up to date.' })
     } catch (error) {
       if (error instanceof ApiError && error.code === 'STOCKTAKE_CONFLICT') {
+        setStep('counts')
         setConflicts((error.details ?? []) as unknown as StocktakeConflict[])
       } else setMessage({ severity: 'error', text: getErrorMessage(error, 'Could not update inventory.') })
     } finally {
@@ -289,8 +290,8 @@ export const StocktakeDetailPage = () => {
                 focusNext(line.ingredientId)
               }
             }}
-            type="number" inputMode="decimal" placeholder="Not counted" aria-label={`Physical count for ${line.ingredientNameSnapshot}`}
-            slotProps={{ htmlInput: { min: 0, step: 'any' } }}
+            type="number" inputMode="decimal" placeholder="Not counted"
+            slotProps={{ htmlInput: { 'aria-label': `Physical count for ${line.ingredientNameSnapshot}`, min: 0, step: 'any' } }}
             sx={{ width: 150, '& input': { ...numericSx, fontSize: '1rem' } }}
           /><Typography sx={numericSx}>{line.unit}</Typography></Stack>
         </Box>)}

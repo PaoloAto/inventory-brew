@@ -109,6 +109,63 @@ export const getIngredientTransactionCount = async (request: APIRequestContext, 
   return response.pagination.total
 }
 
+export interface InventoryTransactionFixture {
+  _id: string
+  type: 'IN' | 'OUT' | 'ADJUST'
+  quantity: number
+  deltaQuantity: number
+  previousStock: number
+  newStock: number
+  reasonCode: string
+  unitCost: number
+  referenceType: string
+  referenceId?: string
+}
+
+export const listIngredientTransactions = async (request: APIRequestContext, id: string) =>
+  readJson<Paginated<InventoryTransactionFixture>>(
+    await request.get(`${API_URL}/ingredients/${id}/transactions`, { params: { page: 1, limit: 100 } }),
+    'List ingredient transactions',
+  )
+
+export const adjustIngredientStock = async (
+  request: APIRequestContext,
+  id: string,
+  payload: { type: 'OUT'; quantity: number; reason: string },
+) =>
+  readJson(
+    await request.post(`${API_URL}/ingredients/${id}/adjust-stock`, { data: payload }),
+    'Adjust ingredient stock',
+  )
+
+export interface StocktakeFixture {
+  _id: string
+  status: 'DRAFT' | 'POSTED' | 'CANCELLED'
+  summary: {
+    lineCount: number
+    varianceLineCount: number
+    shortageLineCount: number
+    overageLineCount: number
+  }
+}
+
+export const getStocktake = async (request: APIRequestContext, id: string) =>
+  readJson<StocktakeFixture>(await request.get(`${API_URL}/stocktakes/${id}`), 'Get stock count')
+
+export interface WasteFixture {
+  ingredientName: string
+  quantity: number
+  reasonCode: string
+  lossValue: number
+  note: string
+}
+
+export const listWaste = async (request: APIRequestContext, ingredientId: string) =>
+  readJson<Paginated<WasteFixture>>(
+    await request.get(`${API_URL}/waste`, { params: { ingredientId, limit: 100 } }),
+    'List waste history',
+  )
+
 export interface PurchaseOrderFixture {
   _id: string
   supplierNameSnapshot: string
