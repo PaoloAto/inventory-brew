@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import {
@@ -55,6 +55,7 @@ export const SalesPage = () => {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null)
   const [recordsLoading, setRecordsLoading] = useState(true)
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -70,17 +71,29 @@ export const SalesPage = () => {
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const analyticsRequestId = useRef(0)
   const range = useMemo(() => periodRange(period), [period])
 
   const loadAnalytics = useCallback(async () => {
+    const requestId = analyticsRequestId.current + 1
+    analyticsRequestId.current = requestId
     setAnalyticsLoading(true)
+    setAnalyticsError(null)
+    setSummary(emptySummary)
+    setPerformance([])
     try {
       const response = await getSalesSummary(range.dateFrom, range.dateTo)
+      if (requestId !== analyticsRequestId.current) return
       setSummary(response.summary)
       setPerformance(response.items)
     } catch (error) {
-      showSnackbar(getErrorMessage(error, 'Failed to load sales performance'), { severity: 'error' })
-    } finally { setAnalyticsLoading(false) }
+      if (requestId !== analyticsRequestId.current) return
+      const message = getErrorMessage(error, 'Sales performance could not be loaded for this period.')
+      setAnalyticsError(message)
+      showSnackbar(message, { severity: 'error' })
+    } finally {
+      if (requestId === analyticsRequestId.current) setAnalyticsLoading(false)
+    }
   }, [range, showSnackbar])
 
   const loadRecords = useCallback(async () => {
@@ -189,7 +202,8 @@ export const SalesPage = () => {
           <ToggleButton value="today">Today</ToggleButton><ToggleButton value="7days">7 days</ToggleButton><ToggleButton value="30days">30 days</ToggleButton>
         </ToggleButtonGroup>
       </Box>
-      {analyticsLoading ? <Paper sx={{ height: 98, border: '1px solid', borderColor: 'divider' }} /> :
+      {analyticsLoading ? <Paper sx={{ height: 98, border: '1px solid', borderColor: 'divider' }} /> : analyticsError ?
+        <Alert severity="error">{analyticsError}</Alert> :
         <MetricStrip items={[
           { label: 'Estimated revenue', value: currency.format(summary.totalRevenue) },
           { label: 'Estimated food cost', value: currency.format(summary.totalEstimatedFoodCost) },
@@ -198,12 +212,14 @@ export const SalesPage = () => {
         ]} />}
 
       <LedgerSection title="Menu performance" subtitle="Based on recorded sales in the selected period." padded={false}>
-        <TableContainer sx={{ overflowX: 'auto' }}><Table size="small" aria-label="Menu performance">
+        {analyticsLoading ? <TableSkeleton rows={6} /> : analyticsError ? <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+          <Alert severity="error">{analyticsError}</Alert>
+        </Box> : <TableContainer sx={{ overflowX: 'auto' }}><Table size="small" aria-label="Menu performance">
           <TableHead><TableRow><TableCell>Menu item</TableCell><TableCell align="right">Sold</TableCell><TableCell align="right">Est. revenue</TableCell><TableCell align="right">Est. food cost</TableCell><TableCell align="right">Est. gross profit</TableCell><TableCell align="right">Margin</TableCell></TableRow></TableHead>
           <TableBody>{performance.map((item) => <TableRow key={item.recipeId}>
             <TableCell sx={{ fontWeight: 500 }}>{item.recipeName}</TableCell><TableCell align="right" sx={numericSx}>{integer.format(item.servingsSold)}</TableCell><TableCell align="right" sx={numericSx}>{currency.format(item.estimatedRevenue)}</TableCell><TableCell align="right" sx={numericSx}>{currency.format(item.estimatedFoodCost)}</TableCell><TableCell align="right" sx={numericSx}>{currency.format(item.estimatedGrossProfit)}</TableCell><TableCell align="right" sx={numericSx}>{margin(item.grossMarginPercent)}</TableCell>
           </TableRow>)}{!analyticsLoading && performance.length === 0 ? <TableRow><TableCell colSpan={6} sx={{ py: 5, textAlign: 'center', color: 'text.secondary' }}>No recorded sales in this period.</TableCell></TableRow> : null}</TableBody>
-        </Table></TableContainer>
+        </Table></TableContainer>}
       </LedgerSection>
 
       <LedgerSection title="Recent sales" subtitle="Open a row to review its recorded details." padded={false}>
