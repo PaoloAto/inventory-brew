@@ -66,11 +66,14 @@ export const PrepPlanPage = () => {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [planError, setPlanError] = useState<string | null>(null)
   const loadRequestId = useRef(0)
+  const previewRequestId = useRef(0)
 
   const loadPlan = useCallback(async () => {
     const requestId = loadRequestId.current + 1
     loadRequestId.current = requestId
+    previewRequestId.current += 1
     setLoading(true)
+    setChecking(false)
     setLoadError(null)
     setMeta(null)
     setRecommendations([])
@@ -109,6 +112,8 @@ export const PrepPlanPage = () => {
 
   const handlePlanChange = (recipeId: string, value: string) => {
     if (!/^\d*$/.test(value)) return
+    previewRequestId.current += 1
+    setChecking(false)
     setPlanValues((current) => ({ ...current, [recipeId]: value }))
     setPlanError(null)
     setPreview(null)
@@ -138,18 +143,23 @@ export const PrepPlanPage = () => {
       return
     }
 
+    const requestId = previewRequestId.current + 1
+    previewRequestId.current = requestId
     setChecking(true)
     setPlanError(null)
     try {
-      setPreview(await previewPrepPlan(lines))
+      const nextPreview = await previewPrepPlan(lines)
+      if (requestId !== previewRequestId.current) return
+      setPreview(nextPreview)
       setPreviewStale(false)
       showSnackbar('Ingredient needs checked.', { severity: 'success' })
     } catch (error) {
+      if (requestId !== previewRequestId.current) return
       setPreview(null)
       setPreviewStale(true)
       setPlanError(getErrorMessage(error, 'Ingredient needs could not be checked.'))
     } finally {
-      setChecking(false)
+      if (requestId === previewRequestId.current) setChecking(false)
     }
   }
 
@@ -206,13 +216,12 @@ export const PrepPlanPage = () => {
             </Stack>
           }
           secondary={
-            <Button variant="contained" onClick={() => void checkIngredients()} disabled={loading || checking}>
+            <Button variant="contained" onClick={() => void checkIngredients()} disabled={loading || checking || Boolean(loadError)}>
               {checking ? 'Checking…' : 'Check ingredients'}
             </Button>
           }
         />
 
-        {loadError ? <Alert severity="error">{loadError}</Alert> : null}
         {meta && meta.recordedDayCount === 0 ? (
           <Alert severity="info">No recent sales data. You can still enter a prep quantity manually.</Alert>
         ) : meta && !meta.dataSufficient ? (
@@ -232,6 +241,10 @@ export const PrepPlanPage = () => {
         >
           {loading ? (
             <TableSkeleton rows={8} />
+          ) : loadError ? (
+            <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+              <Alert severity="error">{loadError}</Alert>
+            </Box>
           ) : visibleRecommendations.length === 0 ? (
             <LedgerEmptyState
               title={recommendations.length === 0 ? 'No active menu items' : 'No matching menu items'}
