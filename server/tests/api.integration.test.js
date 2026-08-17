@@ -2182,8 +2182,14 @@ describe('Inventory Brew API integration', () => {
     const draft = await request(app).post('/api/purchase-orders').send({ supplierId: supplier.body._id, items: [{ ingredientId: ingredient.body._id, orderedQuantity: 1, expectedUnitCost: 2 }] })
     const ordered = await request(app).post(`/api/purchase-orders/${draft.body._id}/order`)
     const received = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: ordered.body.items[0]._id, quantity: 1, unitCost: 2 }] })
-    await PurchaseOrder.findByIdAndUpdate(draft.body._id, { createdAt: new Date('2026-08-14T23:30:00.000Z') }, { timestamps: false })
+    await PurchaseOrder.findByIdAndUpdate(
+      draft.body._id,
+      { createdAt: new Date('2026-08-14T23:30:00.000Z') },
+      { timestamps: false, overwriteImmutable: true },
+    )
     await PurchaseReceipt.findByIdAndUpdate(received.body.purchaseReceipt._id, { receivedAt: new Date('2026-08-14T23:45:00.000Z') })
+    const datedOrder = await PurchaseOrder.findById(draft.body._id).lean()
+    expect(datedOrder.createdAt.toISOString()).toBe('2026-08-14T23:30:00.000Z')
 
     const orders = await request(app).get('/api/purchase-orders').query({ dateFrom: '2026-08-14', dateTo: '2026-08-14' })
     expect(orders.status).toBe(200)
