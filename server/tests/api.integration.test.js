@@ -26,6 +26,7 @@ jest.setTimeout(120000)
 
 describe('Inventory Brew API integration', () => {
   let mongoServer
+  let databaseReady = false
 
   const createProductionFixture = async (suffix = '') => {
     const ingredientResponse = await request(app).post('/api/ingredients').send({
@@ -142,17 +143,27 @@ describe('Inventory Brew API integration', () => {
   }
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryReplSet.create({
-      replSet: {
-        count: 1,
-        storageEngine: 'wiredTiger',
-      },
-    })
-    await mongoose.connect(mongoServer.getUri(), { dbName: 'inventory-brew-test' })
-    await CookEvent.init()
+    try {
+      mongoServer = await MongoMemoryReplSet.create({
+        replSet: {
+          count: 1,
+          storageEngine: 'wiredTiger',
+        },
+      })
+      await mongoose.connect(mongoServer.getUri(), { dbName: 'inventory-brew-test' })
+      await CookEvent.init()
+      databaseReady = true
+    } catch (error) {
+      console.error(`Test database startup failed: ${error.message}`)
+      throw error
+    }
   })
 
   afterEach(async () => {
+    if (!databaseReady || mongoose.connection.readyState !== 1) {
+      return
+    }
+
     await Promise.all([
       Ingredient.deleteMany({}),
       Recipe.deleteMany({}),
@@ -167,9 +178,20 @@ describe('Inventory Brew API integration', () => {
   })
 
   afterAll(async () => {
-    await mongoose.disconnect()
-    if (mongoServer) {
-      await mongoServer.stop()
+    if (!databaseReady) {
+      await Promise.allSettled([
+        mongoose.connection.readyState !== 0 ? mongoose.disconnect() : Promise.resolve(),
+        mongoServer ? mongoServer.stop() : Promise.resolve(),
+      ])
+      return
+    }
+
+    try {
+      await mongoose.disconnect()
+    } finally {
+      if (mongoServer) {
+        await mongoServer.stop()
+      }
     }
   })
 

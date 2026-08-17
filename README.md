@@ -31,8 +31,8 @@ inventory/
 
 ### 1. Prerequisites
 
-- Node.js 18+
-- npm 9+
+- Node.js 22
+- npm 10+
 - MongoDB running locally (or Atlas URI)
 
 ### 2. Environment Files
@@ -135,6 +135,27 @@ npm run test
 npm run seed
 npm run seed:dry
 ```
+
+## Testing and CI
+
+The CI workflow uses Node.js 22 for both client and server verification. This stable major satisfies the current Mongoose and Vite dependency requirements.
+
+Run the client checks locally from the repository root:
+
+```bash
+npm run lint --prefix client
+npm run build --prefix client
+```
+
+Run the server integration suite locally:
+
+```bash
+npm test --prefix server
+```
+
+The server tests use the real Express app, Mongoose, and a temporary MongoDB replica set so transaction behavior is exercised. The local environment must permit `mongodb-memory-server` to download and launch `mongod`.
+
+GitHub Actions automatically runs separate client quality and server integration jobs for pushes and pull requests to `main`. CI is the authoritative clean Linux validation environment.
 
 ## Notes
 
