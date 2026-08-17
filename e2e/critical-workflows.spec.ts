@@ -79,8 +79,8 @@ test('Cooking a recipe consumes inventory and appears in Production history', as
   })
 
   await page.goto('/recipes')
-  await page.getByLabel('Search recipes').fill('E2E Production Bowl')
   const recipeRow = page.getByRole('row').filter({ hasText: 'E2E Production Bowl' })
+  await expect(recipeRow).toBeVisible()
   await recipeRow.getByRole('button', { name: 'Actions for E2E Production Bowl' }).click()
   await page.getByRole('menuitem', { name: 'Cook recipe' }).click()
   const cookDialog = page.getByRole('dialog', { name: 'Cook recipe' })

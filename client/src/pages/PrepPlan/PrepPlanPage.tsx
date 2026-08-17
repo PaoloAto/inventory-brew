@@ -274,8 +274,8 @@ export const PrepPlanPage = () => {
                           inputMode="numeric"
                           value={planValues[item.recipeId] ?? ''}
                           onChange={(event) => handlePlanChange(item.recipeId, event.target.value)}
-                          aria-label={`Planned servings for ${item.recipeName}`}
                           inputProps={{
+                            'aria-label': `Planned servings for ${item.recipeName}`,
                             min: 0,
                             step: 1,
                             style: { textAlign: 'right', fontSize: 16 },
