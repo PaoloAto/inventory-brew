@@ -104,4 +104,67 @@ const createSalesRecord = async ({ businessDate, lines }) => {
   })
 }
 
-module.exports = { createSalesRecord }
+const getSalesSummary = async ({ dateFrom, dateTo }) => {
+  const items = await SalesRecord.aggregate([
+    { $match: { status: 'ACTIVE', businessDate: { $gte: dateFrom, $lte: dateTo } } },
+    { $sort: { businessDate: -1, createdAt: -1 } },
+    { $unwind: '$lines' },
+    {
+      $group: {
+        _id: '$lines.recipeId',
+        recipeName: { $first: '$lines.recipeNameSnapshot' },
+        servingsSold: { $sum: '$lines.servingsSold' },
+        estimatedRevenue: { $sum: '$lines.estimatedRevenue' },
+        estimatedFoodCost: { $sum: '$lines.estimatedFoodCost' },
+        estimatedGrossProfit: { $sum: '$lines.estimatedGrossProfit' },
+      },
+    },
+    {
+      $addFields: {
+        grossMarginPercent: {
+          $cond: [
+            { $eq: ['$estimatedRevenue', 0] },
+            null,
+            { $multiply: [{ $divide: ['$estimatedGrossProfit', '$estimatedRevenue'] }, 100] },
+          ],
+        },
+      },
+    },
+    { $sort: { estimatedRevenue: -1, recipeName: 1 } },
+    {
+      $project: {
+        _id: 0,
+        recipeId: '$_id',
+        recipeName: 1,
+        servingsSold: 1,
+        estimatedRevenue: 1,
+        estimatedFoodCost: 1,
+        estimatedGrossProfit: 1,
+        grossMarginPercent: 1,
+      },
+    },
+  ])
+  const summary = items.reduce(
+    (sum, item) => ({
+      totalServings: sum.totalServings + item.servingsSold,
+      totalRevenue: sum.totalRevenue + item.estimatedRevenue,
+      totalEstimatedFoodCost: sum.totalEstimatedFoodCost + item.estimatedFoodCost,
+      totalEstimatedGrossProfit: sum.totalEstimatedGrossProfit + item.estimatedGrossProfit,
+      grossMarginPercent: null,
+    }),
+    {
+      totalServings: 0,
+      totalRevenue: 0,
+      totalEstimatedFoodCost: 0,
+      totalEstimatedGrossProfit: 0,
+      grossMarginPercent: null,
+    },
+  )
+  summary.grossMarginPercent =
+    summary.totalRevenue === 0
+      ? null
+      : (summary.totalEstimatedGrossProfit / summary.totalRevenue) * 100
+  return { summary, items }
+}
+
+module.exports = { createSalesRecord, getSalesSummary }

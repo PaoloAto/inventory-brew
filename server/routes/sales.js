@@ -1,7 +1,7 @@
 const express = require('express')
 const mongoose = require('mongoose')
 const SalesRecord = require('../models/SalesRecord')
-const { createSalesRecord } = require('../services/salesService')
+const { createSalesRecord, getSalesSummary } = require('../services/salesService')
 
 const router = express.Router()
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -172,42 +172,7 @@ router.get('/summary', async (req, res) => {
   try {
     const details = validateDateRange(req.query, { required: true })
     if (details.length) return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid sales summary query', details)
-    const items = await SalesRecord.aggregate([
-      { $match: { status: 'ACTIVE', businessDate: { $gte: req.query.dateFrom, $lte: req.query.dateTo } } },
-      { $sort: { businessDate: -1, createdAt: -1 } },
-      { $unwind: '$lines' },
-      {
-        $group: {
-          _id: '$lines.recipeId',
-          recipeName: { $first: '$lines.recipeNameSnapshot' },
-          servingsSold: { $sum: '$lines.servingsSold' },
-          estimatedRevenue: { $sum: '$lines.estimatedRevenue' },
-          estimatedFoodCost: { $sum: '$lines.estimatedFoodCost' },
-          estimatedGrossProfit: { $sum: '$lines.estimatedGrossProfit' },
-        },
-      },
-      {
-        $addFields: {
-          grossMarginPercent: {
-            $cond: [{ $eq: ['$estimatedRevenue', 0] }, null, { $multiply: [{ $divide: ['$estimatedGrossProfit', '$estimatedRevenue'] }, 100] }],
-          },
-        },
-      },
-      { $sort: { estimatedRevenue: -1, recipeName: 1 } },
-      { $project: { _id: 0, recipeId: '$_id', recipeName: 1, servingsSold: 1, estimatedRevenue: 1, estimatedFoodCost: 1, estimatedGrossProfit: 1, grossMarginPercent: 1 } },
-    ])
-    const summary = items.reduce(
-      (sum, item) => ({
-        totalServings: sum.totalServings + item.servingsSold,
-        totalRevenue: sum.totalRevenue + item.estimatedRevenue,
-        totalEstimatedFoodCost: sum.totalEstimatedFoodCost + item.estimatedFoodCost,
-        totalEstimatedGrossProfit: sum.totalEstimatedGrossProfit + item.estimatedGrossProfit,
-        grossMarginPercent: null,
-      }),
-      { totalServings: 0, totalRevenue: 0, totalEstimatedFoodCost: 0, totalEstimatedGrossProfit: 0, grossMarginPercent: null },
-    )
-    summary.grossMarginPercent = summary.totalRevenue === 0 ? null : (summary.totalEstimatedGrossProfit / summary.totalRevenue) * 100
-    return res.json({ summary, items })
+    return res.json(await getSalesSummary({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo }))
   } catch (err) {
     console.error('Error summarizing sales:', err)
     return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to summarize sales')

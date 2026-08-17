@@ -3,12 +3,17 @@ const { calculateStockStatus, STOCK_STATUS } = require('../domain/stockStatus')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const Recipe = require('../models/Recipe')
+const {
+  getDashboardOverview,
+  mapRecentTransactions,
+} = require('../services/dashboardOverviewService')
 
 const router = express.Router()
 
 const DEFAULT_LOW_STOCK_LIMIT = 5
 const DEFAULT_RECENT_TRANSACTIONS_LIMIT = 8
 const MAX_LIMIT = 50
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 const sendError = (res, status, code, message, details) => {
   const error = { code, message }
@@ -32,54 +37,35 @@ const parseBoolean = (value) => {
   return undefined
 }
 
-const mapRecentTransactions = async (items) => {
-  if (items.length === 0) return items
-
-  const ingredientIds = [...new Set(items.map((item) => String(item.ingredientId)))]
-  const recipeReferenceIds = [
-    ...new Set(
-      items
-        .filter((item) => item.referenceType === 'recipe' && item.referenceId)
-        .map((item) => String(item.referenceId)),
-    ),
-  ]
-
-  const [ingredientDocs, recipeDocs] = await Promise.all([
-    Ingredient.find({ _id: { $in: ingredientIds } }).select('name unit isActive').lean(),
-    recipeReferenceIds.length > 0
-      ? Recipe.find({ _id: { $in: recipeReferenceIds } }).select('name isActive').lean()
-      : [],
-  ])
-
-  const ingredientMap = new Map(ingredientDocs.map((ingredient) => [String(ingredient._id), ingredient]))
-  const recipeMap = new Map(recipeDocs.map((recipe) => [String(recipe._id), recipe]))
-
-  return items.map((item) => {
-    const ingredient = ingredientMap.get(String(item.ingredientId))
-    const referenceId = item.referenceId ? String(item.referenceId) : undefined
-    const recipe = item.referenceType === 'recipe' && referenceId ? recipeMap.get(referenceId) : undefined
-
-    return {
-      ...item,
-      ingredient: ingredient
-        ? {
-            id: ingredient._id,
-            name: ingredient.name,
-            unit: ingredient.unit,
-            isActive: ingredient.isActive,
-          }
-        : null,
-      reference: item.referenceType
-        ? {
-            type: item.referenceType,
-            id: item.referenceId ?? null,
-            name: recipe?.name ?? null,
-            isActive: recipe?.isActive ?? null,
-          }
-        : null,
-    }
-  })
+const isValidDateOnly = (value) => {
+  if (typeof value !== 'string' || !DATE_ONLY_PATTERN.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
 }
+
+// GET /api/dashboard/overview - read-only manager operations overview
+router.get('/overview', async (req, res) => {
+  try {
+    const details = Object.keys(req.query)
+      .filter((field) => field !== 'asOf')
+      .map((field) => `Unknown query field: ${field}`)
+    if (!isValidDateOnly(req.query.asOf)) {
+      details.push('asOf must be a valid YYYY-MM-DD date')
+    }
+    if (details.length) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid dashboard overview query', details)
+    }
+    return res.json(await getDashboardOverview({ asOf: req.query.asOf }))
+  } catch (err) {
+    console.error('Error fetching dashboard overview:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to fetch dashboard overview')
+  }
+})
 
 // GET /api/dashboard/summary - dashboard metrics and lightweight widgets
 router.get('/summary', async (req, res) => {

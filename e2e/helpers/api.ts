@@ -49,6 +49,8 @@ export const createIngredient = async (
     stockQuantity: number
     costPerUnit: number
     preferredSupplierId?: string
+    reorderLevel?: number
+    parLevel?: number
   },
 ) =>
   readJson<IngredientFixture>(
@@ -97,6 +99,51 @@ export const recordHistoricalSales = async (
     )
   }
 }
+
+export const recordWaste = async (
+  request: APIRequestContext,
+  ingredientId: string,
+  input: { quantity: number; reasonCode: 'WASTE_SPOILAGE'; note?: string },
+) =>
+  readJson(
+    await request.post(`${API_URL}/ingredients/${ingredientId}/waste`, { data: input }),
+    'Record waste fixture',
+  )
+
+export const createPurchaseOrder = async (
+  request: APIRequestContext,
+  input: {
+    supplierId: string
+    ingredientId: string
+    orderedQuantity: number
+    expectedUnitCost: number
+  },
+) =>
+  readJson<PurchaseOrderFixture>(
+    await request.post(`${API_URL}/purchase-orders`, {
+      data: {
+        supplierId: input.supplierId,
+        items: [
+          {
+            ingredientId: input.ingredientId,
+            orderedQuantity: input.orderedQuantity,
+            expectedUnitCost: input.expectedUnitCost,
+          },
+        ],
+      },
+    }),
+    'Create purchase order fixture',
+  )
+
+export const getDashboardOverview = async (request: APIRequestContext, asOf: string) =>
+  readJson<{
+    inventory: {
+      items: Array<{ id: string; suggestedReorderQuantity: number | null }>
+    }
+  }>(
+    await request.get(`${API_URL}/dashboard/overview`, { params: { asOf } }),
+    'Get dashboard overview',
+  )
 
 export const getIngredient = async (request: APIRequestContext, id: string) =>
   readJson<IngredientFixture>(await request.get(`${API_URL}/ingredients/${id}`), 'Get ingredient')

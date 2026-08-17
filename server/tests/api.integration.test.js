@@ -1994,6 +1994,232 @@ describe('Inventory Brew API integration', () => {
     expect(Array.isArray(response.body.recentTransactions)).toBe(true)
   })
 
+  test('GET /api/dashboard/overview composes authoritative manager attention across domains', async () => {
+    const supplier = await request(app).post('/api/suppliers').send({ name: 'Overview Supplier' })
+    const ingredient = await request(app).post('/api/ingredients').send({
+      name: 'Overview Chicken',
+      unit: 'pcs',
+      stockQuantity: 4,
+      costPerUnit: 5,
+      reorderLevel: 5,
+      parLevel: 12,
+      preferredSupplierId: supplier.body._id,
+    })
+    const recipe = await request(app).post('/api/recipes').send({
+      name: 'Overview Bowl',
+      sellingPrice: 100,
+      yieldServings: 1,
+      ingredients: [{ ingredientId: ingredient.body._id, quantity: 1, unit: 'pcs' }],
+    })
+    for (const businessDate of [
+      '2026-08-11',
+      '2026-08-12',
+      '2026-08-13',
+      '2026-08-14',
+      '2026-08-16',
+    ]) {
+      await request(app).post('/api/sales/records').send({
+        businessDate,
+        lines: [{ recipeId: recipe.body._id, servingsSold: 10 }],
+      })
+    }
+    const cancelledSale = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-16',
+      lines: [{ recipeId: recipe.body._id, servingsSold: 100 }],
+    })
+    await request(app).post(`/api/sales/records/${cancelledSale.body.record._id}/cancel`).send({})
+    const wasteRecord = await request(app).post(`/api/ingredients/${ingredient.body._id}/waste`).send({
+      quantity: 2,
+      reasonCode: 'WASTE_SPOILAGE',
+      note: 'Overview waste snapshot',
+    })
+    await InventoryTransaction.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(wasteRecord.body.transaction._id) },
+      { $set: { createdAt: new Date('2026-08-16T18:00:00.000Z') } },
+    )
+    await request(app).put(`/api/ingredients/${ingredient.body._id}`).send({ costPerUnit: 50 })
+
+    const purchaseOrderBase = {
+      supplierId: supplier.body._id,
+      supplierNameSnapshot: supplier.body.name,
+      items: [
+        {
+          ingredientId: ingredient.body._id,
+          ingredientNameSnapshot: ingredient.body.name,
+          unit: 'pcs',
+          orderedQuantity: 10,
+          receivedQuantity: 0,
+          expectedUnitCost: 5,
+        },
+      ],
+    }
+    await PurchaseOrder.create([
+      { ...purchaseOrderBase, orderNumber: 'PO-OVERVIEW-DRAFT', status: 'DRAFT' },
+      {
+        ...purchaseOrderBase,
+        orderNumber: 'PO-OVERVIEW-OVERDUE',
+        status: 'ORDERED',
+        expectedAt: new Date('2026-08-16T12:00:00.000Z'),
+      },
+      {
+        ...purchaseOrderBase,
+        orderNumber: 'PO-OVERVIEW-PARTIAL',
+        status: 'PARTIALLY_RECEIVED',
+        expectedAt: new Date('2026-08-17T12:00:00.000Z'),
+        items: [{ ...purchaseOrderBase.items[0], receivedQuantity: 4 }],
+      },
+      { ...purchaseOrderBase, orderNumber: 'PO-OVERVIEW-RECEIVED', status: 'RECEIVED' },
+      { ...purchaseOrderBase, orderNumber: 'PO-OVERVIEW-CANCELLED', status: 'CANCELLED' },
+    ])
+
+    const response = await request(app).get('/api/dashboard/overview?asOf=2026-08-17')
+
+    expect(response.status).toBe(200)
+    expect(response.body.meta).toMatchObject({
+      asOf: '2026-08-17',
+      salesDateFrom: '2026-08-11',
+      salesDateTo: '2026-08-17',
+      salesDays: 7,
+      prepLookbackDays: 14,
+      inventoryLookbackDays: 30,
+      wasteDateFrom: '2026-08-11',
+      wasteDateTo: '2026-08-17',
+    })
+    expect(response.body.sales.summary).toMatchObject({
+      totalServings: 50,
+      totalRevenue: 5000,
+      totalEstimatedFoodCost: 250,
+      totalEstimatedGrossProfit: 4750,
+      grossMarginPercent: 95,
+    })
+    expect(response.body.sales.topMenuItems[0]).toMatchObject({
+      recipeName: 'Overview Bowl',
+      servingsSold: 50,
+    })
+    expect(response.body.prep).toMatchObject({
+      recordedDayCount: 5,
+      dataSufficient: true,
+      recommendationCount: 1,
+      totalSuggestedServings: 10,
+      shortageIngredientCount: 1,
+      canPrepare: false,
+    })
+    expect(response.body.prep.shortages[0]).toMatchObject({
+      ingredientName: 'Overview Chicken',
+      requiredQuantity: 10,
+      availableQuantity: 2,
+      shortfall: 8,
+      canSatisfy: false,
+    })
+    expect(response.body.inventory).toMatchObject({
+      ingredientCount: 1,
+      totalStockValue: 100,
+      outOfStockCount: 0,
+      reorderTriggeredCount: 1,
+    })
+    expect(response.body.inventory.items[0]).toMatchObject({
+      name: 'Overview Chicken',
+      stockQuantity: 2,
+      suggestedReorderQuantity: 10,
+      preferredSupplier: { id: supplier.body._id, name: 'Overview Supplier' },
+    })
+    expect(response.body.purchasing).toMatchObject({
+      openCount: 3,
+      draftCount: 1,
+      onOrderCount: 2,
+      overdueCount: 1,
+    })
+    expect(response.body.purchasing.items[0]).toMatchObject({
+      orderNumber: 'PO-OVERVIEW-OVERDUE',
+      overdue: true,
+      remainingLineCount: 1,
+    })
+    expect(response.body.purchasing.items.map((item) => item.status)).not.toEqual(
+      expect.arrayContaining(['RECEIVED', 'CANCELLED']),
+    )
+    expect(response.body.waste).toMatchObject({ eventCount: 1, totalWasteValue: 10 })
+    expect(response.body.waste.byReason[0]).toMatchObject({
+      reasonCode: 'WASTE_SPOILAGE',
+      eventCount: 1,
+      totalWasteValue: 10,
+    })
+    expect(response.body.attention).toEqual({
+      prepShortageIngredientCount: response.body.prep.shortageIngredientCount,
+      reorderTriggeredCount: response.body.inventory.reorderTriggeredCount,
+      outOfStockCount: response.body.inventory.outOfStockCount,
+      openPurchaseOrderCount: response.body.purchasing.openCount,
+      overduePurchaseOrderCount: response.body.purchasing.overdueCount,
+    })
+    expect(response.body.sales.topMenuItems.length).toBeLessThanOrEqual(5)
+    expect(response.body.prep.shortages.length).toBeLessThanOrEqual(5)
+    expect(response.body.inventory.items.length).toBeLessThanOrEqual(5)
+    expect(response.body.purchasing.items.length).toBeLessThanOrEqual(5)
+    expect(response.body.waste.byReason.length).toBeLessThanOrEqual(5)
+    expect(response.body.recentTransactions.length).toBeLessThanOrEqual(6)
+  })
+
+  test('GET /api/dashboard/overview returns legitimate empty values without mutating data', async () => {
+    const collectionCounts = async () =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(mongoose.connection.collections).map(async ([name, collection]) => [
+            name,
+            await collection.countDocuments({}),
+          ]),
+        ),
+      )
+    const before = await collectionCounts()
+
+    const response = await request(app).get('/api/dashboard/overview?asOf=2026-08-17')
+
+    expect(response.status).toBe(200)
+    expect(response.body.sales.summary).toEqual({
+      totalServings: 0,
+      totalRevenue: 0,
+      totalEstimatedFoodCost: 0,
+      totalEstimatedGrossProfit: 0,
+      grossMarginPercent: null,
+    })
+    expect(response.body.attention).toEqual({
+      prepShortageIngredientCount: 0,
+      reorderTriggeredCount: 0,
+      outOfStockCount: 0,
+      openPurchaseOrderCount: 0,
+      overduePurchaseOrderCount: 0,
+    })
+    expect(response.body.prep).toMatchObject({
+      recordedDayCount: 0,
+      dataSufficient: false,
+      recommendationCount: 0,
+      totalSuggestedServings: 0,
+      shortageIngredientCount: 0,
+      canPrepare: true,
+      shortages: [],
+    })
+    expect(response.body.inventory).toMatchObject({
+      ingredientCount: 0,
+      totalStockValue: 0,
+      items: [],
+    })
+    expect(response.body.purchasing.items).toEqual([])
+    expect(response.body.waste).toEqual({ eventCount: 0, totalWasteValue: 0, byReason: [] })
+    expect(response.body.recentTransactions).toEqual([])
+    expect(await collectionCounts()).toEqual(before)
+  })
+
+  test('GET /api/dashboard/overview rejects invalid, impossible, missing, and unknown asOf queries', async () => {
+    for (const path of [
+      '/api/dashboard/overview',
+      '/api/dashboard/overview?asOf=2026-02-30',
+      '/api/dashboard/overview?asOf=08%2F17%2F2026',
+      '/api/dashboard/overview?asOf=2026-08-17&extra=true',
+    ]) {
+      const response = await request(app).get(path)
+      expect(response.status).toBe(400)
+      expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    }
+  })
+
   test('GET /api/health and /api/ready return service status', async () => {
     const healthResponse = await request(app).get('/api/health')
     expect(healthResponse.status).toBe(200)
