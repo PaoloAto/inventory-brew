@@ -10,6 +10,7 @@ const Supplier = require('../models/Supplier')
 const PurchaseOrder = require('../models/PurchaseOrder')
 const PurchaseReceipt = require('../models/PurchaseReceipt')
 const StocktakeSession = require('../models/StocktakeSession')
+const SalesRecord = require('../models/SalesRecord')
 const { calculateStockStatus } = require('../domain/stockStatus')
 const {
   getBaseUnit,
@@ -42,6 +43,37 @@ describe('Inventory Brew API integration', () => {
     return { ingredientId: ingredientResponse.body._id, recipeId: recipeResponse.body._id }
   }
 
+  const createSalesFixture = async () => {
+    const chickenIngredient = await request(app).post('/api/ingredients').send({
+      name: 'Chicken Rice portion',
+      unit: 'pcs',
+      stockQuantity: 2,
+      costPerUnit: 45,
+    })
+    const teaIngredient = await request(app).post('/api/ingredients').send({
+      name: 'Iced Tea portion',
+      unit: 'pcs',
+      stockQuantity: 2,
+      costPerUnit: 12,
+    })
+    const chicken = await request(app).post('/api/recipes').send({
+      name: 'Chicken Rice',
+      sellingPrice: 180,
+      yieldServings: 1,
+      ingredients: [{ ingredientId: chickenIngredient.body._id, quantity: 1, unit: 'pcs' }],
+    })
+    const tea = await request(app).post('/api/recipes').send({
+      name: 'Iced Tea',
+      sellingPrice: 60,
+      yieldServings: 1,
+      ingredients: [{ ingredientId: teaIngredient.body._id, quantity: 1, unit: 'pcs' }],
+    })
+    return {
+      ingredientIds: [chickenIngredient.body._id, teaIngredient.body._id],
+      recipeIds: [chicken.body._id, tea.body._id],
+    }
+  }
+
   beforeAll(async () => {
     mongoServer = await MongoMemoryReplSet.create({
       replSet: {
@@ -63,6 +95,7 @@ describe('Inventory Brew API integration', () => {
       PurchaseOrder.deleteMany({}),
       PurchaseReceipt.deleteMany({}),
       StocktakeSession.deleteMany({}),
+      SalesRecord.deleteMany({}),
     ])
   })
 
@@ -2127,5 +2160,198 @@ describe('Inventory Brew API integration', () => {
     const zeroCost = await request(app).post(`/api/purchase-orders/${draft.body._id}/receive`).send({ items: [{ purchaseOrderItemId: lineId, quantity: 1, unitCost: 0 }] })
     expect(zeroCost.status).toBe(200)
     expect(zeroCost.body.purchaseReceipt.items[0].unitCost).toBe(0)
+  })
+
+  test('Sales creation snapshots multi-menu-item economics without changing inventory', async () => {
+    const fixture = await createSalesFixture()
+    const beforeIngredients = await Ingredient.find({ _id: { $in: fixture.ingredientIds } }).sort({ name: 1 }).lean()
+    const beforeTransactions = await InventoryTransaction.countDocuments()
+    const beforeCookEvents = await CookEvent.countDocuments()
+
+    const response = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [
+        { recipeId: fixture.recipeIds[0], servingsSold: 20 },
+        { recipeId: fixture.recipeIds[1], servingsSold: 30 },
+      ],
+    })
+
+    expect(response.status).toBe(201)
+    expect(response.body.record.lines).toEqual([
+      expect.objectContaining({
+        recipeNameSnapshot: 'Chicken Rice',
+        yieldServingsSnapshot: 1,
+        servingsSold: 20,
+        sellingPricePerServingSnapshot: 180,
+        costPerServingSnapshot: 45,
+        estimatedRevenue: 3600,
+        estimatedFoodCost: 900,
+        estimatedGrossProfit: 2700,
+        grossMarginPercentSnapshot: 75,
+      }),
+      expect.objectContaining({
+        recipeNameSnapshot: 'Iced Tea',
+        yieldServingsSnapshot: 1,
+        servingsSold: 30,
+        sellingPricePerServingSnapshot: 60,
+        costPerServingSnapshot: 12,
+        estimatedRevenue: 1800,
+        estimatedFoodCost: 360,
+        estimatedGrossProfit: 1440,
+        grossMarginPercentSnapshot: 80,
+      }),
+    ])
+    expect(response.body.record).toMatchObject({
+      totalServings: 50,
+      totalRevenue: 5400,
+      totalEstimatedFoodCost: 1260,
+      totalEstimatedGrossProfit: 4140,
+    })
+    expect(response.body.record.grossMarginPercent).toBeCloseTo(76.6667, 4)
+
+    const afterIngredients = await Ingredient.find({ _id: { $in: fixture.ingredientIds } }).sort({ name: 1 }).lean()
+    expect(afterIngredients.map(({ stockQuantity, stockQuantityBase }) => ({ stockQuantity, stockQuantityBase }))).toEqual(
+      beforeIngredients.map(({ stockQuantity, stockQuantityBase }) => ({ stockQuantity, stockQuantityBase })),
+    )
+    expect(await InventoryTransaction.countDocuments()).toBe(beforeTransactions)
+    expect(await CookEvent.countDocuments()).toBe(beforeCookEvents)
+  })
+
+  test('Sales create validation rejects coercion, invalid dates, duplicates, and unknown fields', async () => {
+    const fixture = await createSalesFixture()
+    const validLine = { recipeId: fixture.recipeIds[0], servingsSold: 1 }
+    const invalidPayloads = [
+      { businessDate: '2026-08-14', lines: [{ ...validLine, servingsSold: '' }] },
+      { businessDate: '2026-08-14', lines: [{ ...validLine, servingsSold: '23' }] },
+      { businessDate: '2026-08-14', lines: [{ ...validLine, servingsSold: 1.5 }] },
+      { businessDate: '2026-08-14', lines: [{ ...validLine, servingsSold: 0 }] },
+      { businessDate: '2026-08-14', lines: [validLine, validLine] },
+      { businessDate: '2026-13-40', lines: [validLine] },
+      { businessDate: '2026-08-14T00:00:00Z', lines: [validLine] },
+      { businessDate: '2026-08-14', lines: [validLine], totalRevenue: 999 },
+      { businessDate: '2026-08-14', lines: [{ ...validLine, menuPrice: 1 }] },
+    ]
+
+    for (const payload of invalidPayloads) {
+      const response = await request(app).post('/api/sales/records').send(payload)
+      expect(response.status).toBe(400)
+      expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    }
+    expect(await SalesRecord.countDocuments()).toBe(0)
+  })
+
+  test('Sales detail remains an immutable historical name, price, cost, and margin snapshot', async () => {
+    const fixture = await createSalesFixture()
+    const created = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 20 }],
+    })
+    await Recipe.updateOne({ _id: fixture.recipeIds[0] }, { $set: { name: 'Renamed Rice', sellingPrice: 999 } })
+    await Ingredient.updateOne({ _id: fixture.ingredientIds[0] }, { $set: { costPerUnit: 99, averageCostPerBaseUnit: 99 } })
+
+    const detail = await request(app).get(`/api/sales/records/${created.body.record._id}`)
+    expect(detail.status).toBe(200)
+    expect(detail.body.record.lines[0]).toMatchObject({
+      recipeNameSnapshot: 'Chicken Rice',
+      sellingPricePerServingSnapshot: 180,
+      costPerServingSnapshot: 45,
+      estimatedRevenue: 3600,
+      estimatedFoodCost: 900,
+      estimatedGrossProfit: 2700,
+      grossMarginPercentSnapshot: 75,
+    })
+  })
+
+  test('Sales rejects unavailable recipes and invalid costing without partial records', async () => {
+    const fixture = await createSalesFixture()
+    await Recipe.updateOne({ _id: fixture.recipeIds[0] }, { $set: { isActive: false } })
+    const inactive = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 1 }],
+    })
+    expect(inactive.status).toBe(409)
+    expect(inactive.body.error.code).toBe('SALES_RECIPE_UNAVAILABLE')
+
+    await Recipe.updateOne({ _id: fixture.recipeIds[0] }, { $set: { isActive: true } })
+    await Ingredient.updateOne({ _id: fixture.ingredientIds[0] }, { $set: { isActive: false } })
+    const uncostable = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 1 }],
+    })
+    expect(uncostable.status).toBe(409)
+    expect(uncostable.body.error.code).toBe('SALES_COSTING_UNAVAILABLE')
+    expect(await SalesRecord.countDocuments()).toBe(0)
+  })
+
+  test('Sales cancellation preserves history and only allows ACTIVE to CANCELLED', async () => {
+    const fixture = await createSalesFixture()
+    const created = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 2 }],
+    })
+    const cancelled = await request(app).post(`/api/sales/records/${created.body.record._id}/cancel`).send({})
+    expect(cancelled.status).toBe(200)
+    expect(cancelled.body.record.status).toBe('CANCELLED')
+    expect(cancelled.body.record.cancelledAt).toEqual(expect.any(String))
+
+    const repeated = await request(app).post(`/api/sales/records/${created.body.record._id}/cancel`).send({})
+    expect(repeated.status).toBe(409)
+    expect(repeated.body.error.code).toBe('INVALID_SALES_STATE')
+    const detail = await request(app).get(`/api/sales/records/${created.body.record._id}`)
+    expect(detail.body.record.lines[0].estimatedRevenue).toBe(360)
+  })
+
+  test('Sales summary aggregates snapshot money, derives weighted margin, and excludes cancelled records', async () => {
+    const fixture = await createSalesFixture()
+    await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [
+        { recipeId: fixture.recipeIds[0], servingsSold: 20 },
+        { recipeId: fixture.recipeIds[1], servingsSold: 30 },
+      ],
+    })
+    const cancelledRecord = await request(app).post('/api/sales/records').send({
+      businessDate: '2026-08-14',
+      lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 100 }],
+    })
+    await request(app).post(`/api/sales/records/${cancelledRecord.body.record._id}/cancel`).send({})
+
+    const response = await request(app).get('/api/sales/summary?dateFrom=2026-08-14&dateTo=2026-08-14')
+    expect(response.status).toBe(200)
+    expect(response.body.summary).toMatchObject({
+      totalServings: 50,
+      totalRevenue: 5400,
+      totalEstimatedFoodCost: 1260,
+      totalEstimatedGrossProfit: 4140,
+    })
+    expect(response.body.summary.grossMarginPercent).toBeCloseTo(4140 / 5400 * 100)
+    expect(response.body.items).toHaveLength(2)
+    expect(response.body.items[0]).toMatchObject({ recipeName: 'Chicken Rice', servingsSold: 20, estimatedRevenue: 3600 })
+  })
+
+  test('Sales list and summary use inclusive business-date ranges and reject invalid ranges', async () => {
+    const fixture = await createSalesFixture()
+    for (const businessDate of ['2026-08-13', '2026-08-14', '2026-08-15']) {
+      await request(app).post('/api/sales/records').send({
+        businessDate,
+        lines: [{ recipeId: fixture.recipeIds[0], servingsSold: 1 }],
+      })
+    }
+    const list = await request(app).get('/api/sales/records?dateFrom=2026-08-14&dateTo=2026-08-15&limit=1&page=1')
+    expect(list.status).toBe(200)
+    expect(list.body.pagination.total).toBe(2)
+    expect(list.body.items[0].businessDate).toBe('2026-08-15')
+    const summary = await request(app).get('/api/sales/summary?dateFrom=2026-08-14&dateTo=2026-08-15')
+    expect(summary.body.summary.totalServings).toBe(2)
+
+    for (const path of [
+      '/api/sales/records?dateFrom=2026-08-16&dateTo=2026-08-15',
+      '/api/sales/records?dateFrom=08/14/2026',
+      '/api/sales/summary?dateFrom=2026-08-16&dateTo=2026-08-15',
+    ]) {
+      const invalid = await request(app).get(path)
+      expect(invalid.status).toBe(400)
+      expect(invalid.body.error.code).toBe('VALIDATION_ERROR')
+    }
   })
 })

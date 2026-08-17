@@ -25,6 +25,7 @@ import DeleteSweepOutlinedIcon from '@mui/icons-material/DeleteSweepOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
+import PointOfSaleOutlinedIcon from '@mui/icons-material/PointOfSaleOutlined'
 import { NavLink, useLocation } from 'react-router-dom'
 import { ledgerTokens } from '../../theme'
 
@@ -40,6 +41,7 @@ const routeContext: Record<string, string> = {
   '/recipes': 'Recipe costing',
   '/transactions': 'Movement ledger',
   '/production': 'Production history',
+  '/sales': 'Sales performance',
   '/waste': 'Waste ledger',
   '/planning': 'Inventory planning',
   '/purchasing': 'Purchasing ledger',
@@ -61,6 +63,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
       { label: 'Stock Count', icon: <FactCheckOutlinedIcon />, to: '/stock-counts' },
       { label: 'Recipes', icon: <RestaurantMenuOutlinedIcon />, to: '/recipes' },
       { label: 'Production', icon: <SoupKitchenOutlinedIcon />, to: '/production' },
+      { label: 'Sales', icon: <PointOfSaleOutlinedIcon />, to: '/sales' },
       { label: 'Waste', icon: <DeleteSweepOutlinedIcon />, to: '/waste' },
       { label: 'Transactions', icon: <ReceiptLongOutlinedIcon />, to: '/transactions' },
     ],

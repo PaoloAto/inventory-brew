@@ -33,6 +33,12 @@ const ProductionPage = lazy(() =>
   })),
 )
 
+const SalesPage = lazy(() =>
+  import('../pages/Sales/SalesPage').then((module) => ({
+    default: module.SalesPage,
+  })),
+)
+
 const WastePage = lazy(() =>
   import('../pages/Waste/WastePage').then((module) => ({
     default: module.WastePage,
@@ -90,6 +96,7 @@ export const AppRouter = () => {
             <Route path="/recipes" element={<RecipesPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/production" element={<ProductionPage />} />
+            <Route path="/sales" element={<SalesPage />} />
             <Route path="/waste" element={<WastePage />} />
             <Route path="/planning" element={<PlanningPage />} />
             <Route path="/purchasing" element={<PurchasingPage />} />

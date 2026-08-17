@@ -13,6 +13,7 @@ const supplierRoutes = require('./routes/suppliers')
 const purchaseOrderRoutes = require('./routes/purchaseOrders')
 const purchaseReceiptRoutes = require('./routes/purchaseReceipts')
 const stocktakeRoutes = require('./routes/stocktakes')
+const salesRoutes = require('./routes/sales')
 const Ingredient = require('./models/Ingredient')
 const Recipe = require('./models/Recipe')
 
@@ -152,6 +153,7 @@ app.use('/api/suppliers', supplierRoutes)
 app.use('/api/purchase-orders', purchaseOrderRoutes)
 app.use('/api/purchase-receipts', purchaseReceiptRoutes)
 app.use('/api/stocktakes', stocktakeRoutes)
+app.use('/api/sales', salesRoutes)
 
 app.use('/api', (_req, res) => {
   res.status(404).json({
