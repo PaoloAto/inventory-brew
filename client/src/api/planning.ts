@@ -53,7 +53,75 @@ export interface InventoryPlanningResponse {
   pagination: PaginationMeta
 }
 
+export type PrepLookbackDays = 7 | 14 | 30
+
+export interface PrepPlanMeta {
+  asOf: string
+  historyDateFrom: string
+  historyDateTo: string
+  lookbackDays: PrepLookbackDays
+  recordedDayCount: number
+  dataSufficient: boolean
+}
+
+export interface PrepRecommendation {
+  recipeId: string
+  recipeName: string
+  recentServingsSold: number
+  averageDailySales: number
+  suggestedServings: number
+}
+
+export interface PrepIngredientRequirement {
+  ingredientId: string
+  ingredientName: string
+  unit: Unit
+  baseUnit: 'pcs' | 'g' | 'ml'
+  requiredQuantity: number
+  requiredQuantityBase: number
+  availableQuantity: number
+  availableQuantityBase: number
+  shortfall: number
+  shortfallBase: number
+  canSatisfy: boolean
+  preferredSupplier: { id: string; name: string } | null
+}
+
+export interface PrepPreview {
+  summary: {
+    recipeCount: number
+    totalPlannedServings: number
+    ingredientCount: number
+    shortageIngredientCount: number
+    estimatedIngredientCost: number
+    canPrepare: boolean
+  }
+  ingredients: PrepIngredientRequirement[]
+}
+
+export interface PrepPlanResponse {
+  meta: PrepPlanMeta
+  recommendations: PrepRecommendation[]
+  preview: PrepPreview
+}
+
 import { request } from './http'
 
 export const getInventoryPlanning = (query: InventoryPlanningQuery = {}) =>
   request<InventoryPlanningResponse>('/planning/inventory', { method: 'GET', query })
+
+export const getPrepPlan = (asOf: string, lookbackDays: PrepLookbackDays) =>
+  request<PrepPlanResponse>('/planning/prep', {
+    method: 'GET',
+    query: { asOf, lookbackDays },
+  })
+
+export const previewPrepPlan = async (
+  lines: Array<{ recipeId: string; servings: number }>,
+) => {
+  const response = await request<{ preview: PrepPreview }>('/planning/prep/preview', {
+    method: 'POST',
+    body: { lines },
+  })
+  return response.preview
+}

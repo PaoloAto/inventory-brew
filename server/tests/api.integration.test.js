@@ -74,6 +74,73 @@ describe('Inventory Brew API integration', () => {
     }
   }
 
+  const createPrepFixture = async ({ stockQuantity = 1.5 } = {}) => {
+    const rice = await request(app).post('/api/ingredients').send({
+      name: 'Prep rice',
+      unit: 'kg',
+      stockQuantity,
+      costPerUnit: 60,
+    })
+    const bowl = await request(app).post('/api/recipes').send({
+      name: 'Rice Bowl',
+      sellingPrice: 180,
+      yieldServings: 1,
+      ingredients: [{ ingredientId: rice.body._id, quantity: 0.1, unit: 'kg' }],
+    })
+    const soup = await request(app).post('/api/recipes').send({
+      name: 'Rice Soup',
+      sellingPrice: 120,
+      yieldServings: 1,
+      ingredients: [{ ingredientId: rice.body._id, quantity: 0.25, unit: 'kg' }],
+    })
+    return { ingredientId: rice.body._id, bowlId: bowl.body._id, soupId: soup.body._id }
+  }
+
+  const createPrepSalesRecord = async ({ businessDate, lines, status = 'ACTIVE' }) => {
+    const recipes = await Recipe.find({ _id: { $in: lines.map((line) => line.recipeId) } }).lean()
+    const recipeMap = new Map(recipes.map((recipe) => [String(recipe._id), recipe]))
+    const snapshots = lines.map((line) => {
+      const recipe = recipeMap.get(String(line.recipeId))
+      return {
+        recipeId: recipe._id,
+        recipeNameSnapshot: recipe.name,
+        yieldServingsSnapshot: recipe.yieldServings,
+        servingsSold: line.servings,
+        sellingPricePerServingSnapshot: recipe.sellingPrice,
+        costPerServingSnapshot: 0,
+        estimatedRevenue: line.servings * recipe.sellingPrice,
+        estimatedFoodCost: 0,
+        estimatedGrossProfit: line.servings * recipe.sellingPrice,
+        grossMarginPercentSnapshot: 100,
+      }
+    })
+    const totalServings = snapshots.reduce((sum, line) => sum + line.servingsSold, 0)
+    const totalRevenue = snapshots.reduce((sum, line) => sum + line.estimatedRevenue, 0)
+    return SalesRecord.create({
+      businessDate,
+      status,
+      cancelledAt: status === 'CANCELLED' ? new Date() : null,
+      lines: snapshots,
+      totalServings,
+      totalRevenue,
+      totalEstimatedFoodCost: 0,
+      totalEstimatedGrossProfit: totalRevenue,
+      grossMarginPercent: 100,
+    })
+  }
+
+  const seedPrepAcceptanceSales = async (fixture) => {
+    for (const businessDate of ['2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-16']) {
+      await createPrepSalesRecord({
+        businessDate,
+        lines: [
+          { recipeId: fixture.bowlId, servings: 10 },
+          { recipeId: fixture.soupId, servings: 4 },
+        ],
+      })
+    }
+  }
+
   beforeAll(async () => {
     mongoServer = await MongoMemoryReplSet.create({
       replSet: {
@@ -2353,5 +2420,243 @@ describe('Inventory Brew API integration', () => {
       expect(invalid.status).toBe(400)
       expect(invalid.body.error.code).toBe('VALIDATION_ERROR')
     }
+  })
+
+  test('Prep Plan recommendations sum multiple records while counting each recorded business date once', async () => {
+    const fixture = await createPrepFixture()
+    await createPrepSalesRecord({
+      businessDate: '2026-08-11',
+      lines: [{ recipeId: fixture.bowlId, servings: 4 }],
+    })
+    await createPrepSalesRecord({
+      businessDate: '2026-08-11',
+      lines: [
+        { recipeId: fixture.bowlId, servings: 6 },
+        { recipeId: fixture.soupId, servings: 4 },
+      ],
+    })
+    for (const businessDate of ['2026-08-12', '2026-08-13', '2026-08-14', '2026-08-16']) {
+      await createPrepSalesRecord({
+        businessDate,
+        lines: [
+          { recipeId: fixture.bowlId, servings: 10 },
+          { recipeId: fixture.soupId, servings: 4 },
+        ],
+      })
+    }
+
+    const response = await request(app).get('/api/planning/prep?asOf=2026-08-17&lookbackDays=14')
+    expect(response.status).toBe(200)
+    expect(response.body.meta).toMatchObject({
+      historyDateFrom: '2026-08-03',
+      historyDateTo: '2026-08-16',
+      recordedDayCount: 5,
+      dataSufficient: true,
+    })
+    expect(response.body.recommendations).toEqual([
+      expect.objectContaining({
+        recipeName: 'Rice Bowl',
+        recentServingsSold: 50,
+        averageDailySales: 10,
+        suggestedServings: 10,
+      }),
+      expect.objectContaining({
+        recipeName: 'Rice Soup',
+        recentServingsSold: 20,
+        averageDailySales: 4,
+        suggestedServings: 4,
+      }),
+    ])
+  })
+
+  test('Prep Plan history excludes missing, cancelled, as-of, and future business dates', async () => {
+    const fixture = await createPrepFixture()
+    for (const businessDate of ['2026-08-03', '2026-08-10', '2026-08-16']) {
+      await createPrepSalesRecord({
+        businessDate,
+        lines: [{ recipeId: fixture.bowlId, servings: 3 }],
+      })
+    }
+    await createPrepSalesRecord({
+      businessDate: '2026-08-12',
+      status: 'CANCELLED',
+      lines: [{ recipeId: fixture.bowlId, servings: 100 }],
+    })
+    await createPrepSalesRecord({
+      businessDate: '2026-08-17',
+      lines: [{ recipeId: fixture.bowlId, servings: 100 }],
+    })
+    await createPrepSalesRecord({
+      businessDate: '2026-08-18',
+      lines: [{ recipeId: fixture.bowlId, servings: 100 }],
+    })
+
+    const response = await request(app).get('/api/planning/prep?asOf=2026-08-17&lookbackDays=14')
+    const bowl = response.body.recommendations.find((item) => item.recipeId === fixture.bowlId)
+    expect(response.body.meta.recordedDayCount).toBe(3)
+    expect(bowl).toMatchObject({ recentServingsSold: 9, averageDailySales: 3, suggestedServings: 3 })
+  })
+
+  test('Prep Plan returns all active recipes with zero suggestions when no sales days are recorded', async () => {
+    await createPrepFixture()
+    const response = await request(app).get('/api/planning/prep?asOf=2026-08-17&lookbackDays=14')
+    expect(response.status).toBe(200)
+    expect(response.body.meta).toMatchObject({ recordedDayCount: 0, dataSufficient: false })
+    expect(response.body.recommendations).toHaveLength(2)
+    expect(response.body.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ recentServingsSold: 0, averageDailySales: 0, suggestedServings: 0 }),
+      ]),
+    )
+    expect(response.body.preview).toEqual({
+      summary: {
+        recipeCount: 0,
+        totalPlannedServings: 0,
+        ingredientCount: 0,
+        shortageIngredientCount: 0,
+        estimatedIngredientCost: 0,
+        canPrepare: true,
+      },
+      ingredients: [],
+    })
+  })
+
+  test('Prep Plan aggregates shared canonical Ingredient needs before checking stock', async () => {
+    const fixture = await createPrepFixture()
+    await seedPrepAcceptanceSales(fixture)
+    const response = await request(app).get('/api/planning/prep?asOf=2026-08-17&lookbackDays=14')
+    expect(response.status).toBe(200)
+    expect(response.body.preview.summary).toMatchObject({
+      recipeCount: 2,
+      totalPlannedServings: 14,
+      ingredientCount: 1,
+      shortageIngredientCount: 1,
+      canPrepare: false,
+    })
+    expect(response.body.preview.ingredients).toEqual([
+      expect.objectContaining({
+        ingredientName: 'Prep rice',
+        unit: 'kg',
+        baseUnit: 'g',
+        requiredQuantity: 2,
+        requiredQuantityBase: 2000,
+        availableQuantity: 1.5,
+        availableQuantityBase: 1500,
+        shortfall: 0.5,
+        shortfallBase: 500,
+        canSatisfy: false,
+      }),
+    ])
+  })
+
+  test('Prep Plan GET and preview remain read-only across inventory and purchasing collections', async () => {
+    const fixture = await createPrepFixture()
+    await seedPrepAcceptanceSales(fixture)
+    const beforeIngredient = await Ingredient.findById(fixture.ingredientId).lean()
+    const beforeCounts = {
+      transactions: await InventoryTransaction.countDocuments(),
+      cooks: await CookEvent.countDocuments(),
+      orders: await PurchaseOrder.countDocuments(),
+    }
+
+    expect((await request(app).get('/api/planning/prep?asOf=2026-08-17&lookbackDays=14')).status).toBe(200)
+    expect(
+      (
+        await request(app).post('/api/planning/prep/preview').send({
+          lines: [
+            { recipeId: fixture.bowlId, servings: 10 },
+            { recipeId: fixture.soupId, servings: 4 },
+          ],
+        })
+      ).status,
+    ).toBe(200)
+
+    const afterIngredient = await Ingredient.findById(fixture.ingredientId).lean()
+    expect(afterIngredient.stockQuantity).toBe(beforeIngredient.stockQuantity)
+    expect(afterIngredient.stockQuantityBase).toBe(beforeIngredient.stockQuantityBase)
+    expect(await InventoryTransaction.countDocuments()).toBe(beforeCounts.transactions)
+    expect(await CookEvent.countDocuments()).toBe(beforeCounts.cooks)
+    expect(await PurchaseOrder.countDocuments()).toBe(beforeCounts.orders)
+  })
+
+  test('Prep Plan preview strictly rejects coercion, duplicates, invalid ids, and unknown fields', async () => {
+    const fixture = await createPrepFixture()
+    const validLine = { recipeId: fixture.bowlId, servings: 10 }
+    const payloads = [
+      { lines: [{ ...validLine, servings: '10' }] },
+      { lines: [{ ...validLine, servings: 1.5 }] },
+      { lines: [{ ...validLine, servings: 0 }] },
+      { lines: [validLine, validLine] },
+      { lines: [{ recipeId: 'not-an-id', servings: 10 }] },
+      { lines: [{ ...validLine, unit: 'kg' }] },
+      { lines: [validLine], totalServings: 10 },
+    ]
+    for (const payload of payloads) {
+      const response = await request(app).post('/api/planning/prep/preview').send(payload)
+      expect(response.status).toBe(400)
+      expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    }
+    for (const path of [
+      '/api/planning/prep?asOf=2026-13-40&lookbackDays=14',
+      '/api/planning/prep?asOf=2026-08-17&lookbackDays=10',
+      '/api/planning/prep?asOf=2026-08-17&lookbackDays=14&extra=true',
+    ]) {
+      const response = await request(app).get(path)
+      expect(response.status).toBe(400)
+      expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    }
+  })
+
+  test('Prep Plan reports unavailable Recipes and configuration errors without partial previews', async () => {
+    const fixture = await createPrepFixture()
+    await Recipe.updateOne({ _id: fixture.bowlId }, { $set: { isActive: false } })
+    const inactive = await request(app).post('/api/planning/prep/preview').send({
+      lines: [{ recipeId: fixture.bowlId, servings: 10 }],
+    })
+    expect(inactive.status).toBe(409)
+    expect(inactive.body.error.code).toBe('PREP_RECIPE_UNAVAILABLE')
+
+    const missing = await request(app).post('/api/planning/prep/preview').send({
+      lines: [{ recipeId: new mongoose.Types.ObjectId().toString(), servings: 10 }],
+    })
+    expect(missing.status).toBe(409)
+    expect(missing.body.error.code).toBe('PREP_RECIPE_UNAVAILABLE')
+
+    await Recipe.updateOne({ _id: fixture.bowlId }, { $set: { isActive: true } })
+    await Ingredient.updateOne({ _id: fixture.ingredientId }, { $set: { isActive: false } })
+    const invalid = await request(app).post('/api/planning/prep/preview').send({
+      lines: [{ recipeId: fixture.bowlId, servings: 10 }],
+    })
+    expect(invalid.status).toBe(409)
+    expect(invalid.body.error.code).toBe('PREP_CONFIGURATION_UNAVAILABLE')
+  })
+
+  test('Prep Plan ready preview sums current ingredient cost and returns an active preferred supplier', async () => {
+    const fixture = await createPrepFixture({ stockQuantity: 3 })
+    const supplier = await Supplier.create({ name: 'Prep Foods' })
+    await Ingredient.updateOne(
+      { _id: fixture.ingredientId },
+      { $set: { preferredSupplierId: supplier._id } },
+    )
+    const response = await request(app).post('/api/planning/prep/preview').send({
+      lines: [
+        { recipeId: fixture.bowlId, servings: 10 },
+        { recipeId: fixture.soupId, servings: 4 },
+      ],
+    })
+    expect(response.status).toBe(200)
+    expect(response.body.preview.summary).toMatchObject({
+      totalPlannedServings: 14,
+      shortageIngredientCount: 0,
+      estimatedIngredientCost: 120,
+      canPrepare: true,
+    })
+    expect(response.body.preview.ingredients[0]).toMatchObject({
+      requiredQuantity: 2,
+      availableQuantity: 3,
+      shortfall: 0,
+      canSatisfy: true,
+      preferredSupplier: { id: String(supplier._id), name: 'Prep Foods' },
+    })
   })
 })

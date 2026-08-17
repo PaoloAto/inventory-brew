@@ -1,12 +1,16 @@
 const express = require('express')
+const mongoose = require('mongoose')
 const Ingredient = require('../models/Ingredient')
 const InventoryTransaction = require('../models/InventoryTransaction')
 const { buildInventoryPlanning, compareUrgency } = require('../services/inventoryPlanningService')
+const { getPrepPlan, previewPrepPlan } = require('../services/prepPlanningService')
 
 const router = express.Router()
 const LOOKBACK_DAYS = [7, 14, 30, 60, 90]
 const MAX_LIMIT = 100
 const SORT_FIELDS = ['urgency', 'daysRemaining', 'name', 'averageDailyDepletion']
+const PREP_LOOKBACK_DAYS = [7, 14, 30]
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 const sendError = (res, status, code, message, details) => {
   const error = { code, message }
@@ -33,6 +37,92 @@ const parseBoolean = (value) => {
 }
 
 const escapeRegExp = (input) => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const isValidDateOnly = (value) => {
+  if (typeof value !== 'string' || !DATE_ONLY_PATTERN.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+router.get('/prep', async (req, res) => {
+  try {
+    const unknownFields = Object.keys(req.query).filter((key) => !['asOf', 'lookbackDays'].includes(key))
+    const details = []
+    if (unknownFields.length > 0) details.push(`Unknown query field(s): ${unknownFields.join(', ')}`)
+    if (!isValidDateOnly(req.query.asOf)) details.push('asOf must be a valid YYYY-MM-DD date')
+    const lookbackRaw = req.query.lookbackDays === undefined ? '14' : req.query.lookbackDays
+    if (typeof lookbackRaw !== 'string' || !PREP_LOOKBACK_DAYS.map(String).includes(lookbackRaw)) {
+      details.push(`lookbackDays must be one of: ${PREP_LOOKBACK_DAYS.join(', ')}`)
+    }
+    if (details.length > 0) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid prep planning query', details)
+    }
+
+    const result = await getPrepPlan({ asOf: req.query.asOf, lookbackDays: Number(lookbackRaw) })
+    return res.json(result)
+  } catch (err) {
+    if (err?.isAppError) return sendError(res, err.status, err.code, err.message, err.details)
+    console.error('Error fetching prep plan:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to fetch prep plan')
+  }
+})
+
+router.post('/prep/preview', async (req, res) => {
+  try {
+    const payload = req.body
+    const details = []
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid prep preview payload', [
+        'Request body must be an object',
+      ])
+    }
+    const unknownFields = Object.keys(payload).filter((key) => key !== 'lines')
+    if (unknownFields.length > 0) details.push(`Unknown field(s): ${unknownFields.join(', ')}`)
+    if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
+      details.push('lines must be a non-empty array')
+    } else {
+      const seenRecipeIds = new Set()
+      payload.lines.forEach((line, index) => {
+        if (!line || typeof line !== 'object' || Array.isArray(line)) {
+          details.push(`lines[${index}] must be an object`)
+          return
+        }
+        const unknownLineFields = Object.keys(line).filter(
+          (key) => !['recipeId', 'servings'].includes(key),
+        )
+        if (unknownLineFields.length > 0) {
+          details.push(`lines[${index}] has unknown field(s): ${unknownLineFields.join(', ')}`)
+        }
+        if (typeof line.recipeId !== 'string' || !mongoose.isValidObjectId(line.recipeId)) {
+          details.push(`lines[${index}].recipeId must be a valid id`)
+        } else if (seenRecipeIds.has(line.recipeId)) {
+          details.push(`lines[${index}].recipeId duplicates another line`)
+        } else {
+          seenRecipeIds.add(line.recipeId)
+        }
+        if (
+          typeof line.servings !== 'number' ||
+          !Number.isFinite(line.servings) ||
+          !Number.isInteger(line.servings) ||
+          line.servings <= 0
+        ) {
+          details.push(`lines[${index}].servings must be a positive integer number`)
+        }
+      })
+    }
+    if (details.length > 0) {
+      return sendError(res, 400, 'VALIDATION_ERROR', 'Invalid prep preview payload', details)
+    }
+
+    const preview = await previewPrepPlan(payload.lines)
+    return res.json({ preview })
+  } catch (err) {
+    if (err?.isAppError) return sendError(res, err.status, err.code, err.message, err.details)
+    console.error('Error previewing prep plan:', err)
+    return sendError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to preview prep plan')
+  }
+})
 
 router.get('/inventory', async (req, res) => {
   try {

@@ -51,6 +51,12 @@ const PlanningPage = lazy(() =>
   })),
 )
 
+const PrepPlanPage = lazy(() =>
+  import('../pages/PrepPlan/PrepPlanPage').then((module) => ({
+    default: module.PrepPlanPage,
+  })),
+)
+
 const PurchasingPage = lazy(() =>
   import('../pages/Purchasing/PurchasingPage').then((module) => ({
     default: module.PurchasingPage,
@@ -99,6 +105,7 @@ export const AppRouter = () => {
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/waste" element={<WastePage />} />
             <Route path="/planning" element={<PlanningPage />} />
+            <Route path="/prep-plan" element={<PrepPlanPage />} />
             <Route path="/purchasing" element={<PurchasingPage />} />
             <Route path="/stock-counts" element={<StocktakesPage />} />
             <Route path="/stock-counts/:id" element={<StocktakeDetailPage />} />
