@@ -1,0 +1,159 @@
+import { expect, type APIRequestContext, type APIResponse } from '@playwright/test'
+
+const API_URL = 'http://127.0.0.1:5001/api'
+const RESET_URL = 'http://127.0.0.1:5002/reset'
+
+export interface SupplierFixture {
+  _id: string
+  name: string
+}
+
+export interface IngredientFixture {
+  _id: string
+  name: string
+  unit: 'pcs'
+  stockQuantity: number
+  stockQuantityBase: number
+}
+
+export interface RecipeFixture {
+  _id: string
+  name: string
+}
+
+interface Paginated<T> {
+  items: T[]
+  pagination: { total: number }
+}
+
+const readJson = async <T>(response: APIResponse, label: string): Promise<T> => {
+  const body = await response.text()
+  expect(response.ok(), `${label} failed (${response.status()}): ${body}`).toBeTruthy()
+  return JSON.parse(body) as T
+}
+
+export const resetTestState = async (request: APIRequestContext) => {
+  await readJson(await request.post(RESET_URL), 'Reset E2E state')
+}
+
+export const createSupplier = async (request: APIRequestContext, name: string) =>
+  readJson<SupplierFixture>(
+    await request.post(`${API_URL}/suppliers`, { data: { name } }),
+    `Create supplier ${name}`,
+  )
+
+export const createIngredient = async (
+  request: APIRequestContext,
+  input: {
+    name: string
+    stockQuantity: number
+    costPerUnit: number
+    preferredSupplierId?: string
+  },
+) =>
+  readJson<IngredientFixture>(
+    await request.post(`${API_URL}/ingredients`, {
+      data: {
+        ...input,
+        unit: 'pcs',
+      },
+    }),
+    `Create ingredient ${input.name}`,
+  )
+
+export const createRecipe = async (
+  request: APIRequestContext,
+  input: {
+    name: string
+    ingredientId: string
+    quantity: number
+    sellingPrice?: number
+  },
+) =>
+  readJson<RecipeFixture>(
+    await request.post(`${API_URL}/recipes`, {
+      data: {
+        name: input.name,
+        sellingPrice: input.sellingPrice ?? 100,
+        yieldServings: 1,
+        ingredients: [{ ingredientId: input.ingredientId, quantity: input.quantity, unit: 'pcs' }],
+      },
+    }),
+    `Create recipe ${input.name}`,
+  )
+
+export const recordHistoricalSales = async (
+  request: APIRequestContext,
+  recipeId: string,
+  businessDates: string[],
+  servingsSold: number,
+) => {
+  for (const businessDate of businessDates) {
+    await readJson(
+      await request.post(`${API_URL}/sales/records`, {
+        data: { businessDate, lines: [{ recipeId, servingsSold }] },
+      }),
+      `Record historical sales for ${businessDate}`,
+    )
+  }
+}
+
+export const getIngredient = async (request: APIRequestContext, id: string) =>
+  readJson<IngredientFixture>(await request.get(`${API_URL}/ingredients/${id}`), 'Get ingredient')
+
+export const getIngredientTransactionCount = async (request: APIRequestContext, id: string) => {
+  const response = await readJson<Paginated<unknown>>(
+    await request.get(`${API_URL}/ingredients/${id}/transactions`, { params: { page: 1, limit: 1 } }),
+    'Get ingredient transaction count',
+  )
+  return response.pagination.total
+}
+
+export interface PurchaseOrderFixture {
+  _id: string
+  supplierNameSnapshot: string
+  status: string
+  items: Array<{ ingredientId: string; orderedQuantity: number; receivedQuantity: number }>
+}
+
+export const listPurchaseOrders = async (request: APIRequestContext) =>
+  readJson<Paginated<PurchaseOrderFixture>>(
+    await request.get(`${API_URL}/purchase-orders`, { params: { limit: 100 } }),
+    'List purchase orders',
+  )
+
+export interface ProductionFixture {
+  recipeId: string
+  recipeNameSnapshot: string
+  servings: number
+}
+
+export const listProduction = async (request: APIRequestContext) =>
+  readJson<Paginated<ProductionFixture>>(
+    await request.get(`${API_URL}/production`, { params: { limit: 100 } }),
+    'List production history',
+  )
+
+export interface SalesRecordListFixture {
+  id: string
+  status: 'ACTIVE' | 'CANCELLED'
+}
+
+export interface SalesRecordFixture {
+  _id: string
+  status: 'ACTIVE' | 'CANCELLED'
+}
+
+export const listSalesRecords = async (request: APIRequestContext) =>
+  readJson<Paginated<SalesRecordListFixture>>(
+    await request.get(`${API_URL}/sales/records`, { params: { limit: 100 } }),
+    'List sales records',
+  )
+
+export const getSalesRecord = async (request: APIRequestContext, id: string) => {
+  const response = await readJson<{ record: SalesRecordFixture }>(
+    await request.get(`${API_URL}/sales/records/${id}`),
+    'Get sales record',
+  )
+  return response.record
+}

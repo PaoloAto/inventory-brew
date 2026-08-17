@@ -155,7 +155,16 @@ npm test --prefix server
 
 The server tests use the real Express app, Mongoose, and a temporary MongoDB replica set so transaction behavior is exercised. The local environment must permit `mongodb-memory-server` to download and launch `mongod`.
 
-GitHub Actions automatically runs separate client quality and server integration jobs for pushes and pull requests to `main`. CI is the authoritative clean Linux validation environment.
+Install the Chromium browser once, then run the critical browser workflows:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+The E2E command automatically starts a temporary transaction-capable MongoDB replica set, the real API server, and the Vite frontend on isolated test ports.
+
+GitHub Actions automatically runs client quality, server integration, and critical browser workflow jobs for pushes and pull requests to `main`. CI is the authoritative clean Linux validation environment.
 
 ## Notes
 
