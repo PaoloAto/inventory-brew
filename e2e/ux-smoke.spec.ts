@@ -10,10 +10,14 @@ test.beforeEach(async ({ request }) => {
 test('Mobile shell keeps core operational routes navigable without global overflow', async ({ page }) => {
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
   const assertNoDocumentOverflow = async () => {
-    const hasNoOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2,
-    )
-    expect(hasNoOverflow).toBeTruthy()
+    const dimensions = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }))
+    expect(
+      dimensions.scrollWidth,
+      `document overflowed: scrollWidth=${dimensions.scrollWidth}, clientWidth=${dimensions.clientWidth}`,
+    ).toBeLessThanOrEqual(dimensions.clientWidth + 2)
   }
   const openNavigation = async () => {
     await page.getByRole('button', { name: 'Open navigation' }).click()
