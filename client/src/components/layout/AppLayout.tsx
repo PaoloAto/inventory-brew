@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   AppBar,
-  Avatar,
   Box,
   Drawer,
   IconButton,
@@ -10,6 +9,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  ListSubheader,
   Toolbar,
   Typography,
   useMediaQuery,
@@ -37,7 +37,7 @@ interface AppLayoutProps {
 }
 
 const routeContext: Record<string, string> = {
-  '/': 'Inventory overview',
+  '/': 'Manager overview',
   '/ingredients': 'Ingredient ledger',
   '/recipes': 'Recipe costing',
   '/transactions': 'Movement ledger',
@@ -50,28 +50,40 @@ const routeContext: Record<string, string> = {
   '/stock-counts': 'Stock Count',
 }
 
+const overviewItem = { label: 'Overview', icon: <DashboardOutlinedIcon />, to: '/' }
+const navigationSections = [
+  {
+    label: 'Inventory',
+    items: [
+      { label: 'Ingredients', icon: <Inventory2OutlinedIcon />, to: '/ingredients' },
+      { label: 'Planning', icon: <EventNoteOutlinedIcon />, to: '/planning' },
+      { label: 'Purchasing', icon: <LocalShippingOutlinedIcon />, to: '/purchasing' },
+      { label: 'Stock Count', icon: <FactCheckOutlinedIcon />, to: '/stock-counts' },
+    ],
+  },
+  {
+    label: 'Kitchen',
+    items: [
+      { label: 'Recipes', icon: <RestaurantMenuOutlinedIcon />, to: '/recipes' },
+      { label: 'Prep Plan', icon: <ChecklistRoundedIcon />, to: '/prep-plan' },
+      { label: 'Production', icon: <SoupKitchenOutlinedIcon />, to: '/production' },
+    ],
+  },
+  {
+    label: 'Review',
+    items: [
+      { label: 'Sales', icon: <PointOfSaleOutlinedIcon />, to: '/sales' },
+      { label: 'Waste', icon: <DeleteSweepOutlinedIcon />, to: '/waste' },
+      { label: 'Transactions', icon: <ReceiptLongOutlinedIcon />, to: '/transactions' },
+    ],
+  },
+]
+
 export const AppLayout = ({ children }: AppLayoutProps) => {
   const location = useLocation()
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
   const [mobileOpen, setMobileOpen] = useState(false)
-
-  const navItems = useMemo(
-    () => [
-      { label: 'Overview', icon: <DashboardOutlinedIcon />, to: '/' },
-      { label: 'Ingredients', icon: <Inventory2OutlinedIcon />, to: '/ingredients' },
-      { label: 'Planning', icon: <EventNoteOutlinedIcon />, to: '/planning' },
-      { label: 'Purchasing', icon: <LocalShippingOutlinedIcon />, to: '/purchasing' },
-      { label: 'Stock Count', icon: <FactCheckOutlinedIcon />, to: '/stock-counts' },
-      { label: 'Recipes', icon: <RestaurantMenuOutlinedIcon />, to: '/recipes' },
-      { label: 'Prep Plan', icon: <ChecklistRoundedIcon />, to: '/prep-plan' },
-      { label: 'Production', icon: <SoupKitchenOutlinedIcon />, to: '/production' },
-      { label: 'Sales', icon: <PointOfSaleOutlinedIcon />, to: '/sales' },
-      { label: 'Waste', icon: <DeleteSweepOutlinedIcon />, to: '/waste' },
-      { label: 'Transactions', icon: <ReceiptLongOutlinedIcon />, to: '/transactions' },
-    ],
-    [],
-  )
 
   const currentContext =
     Object.entries(routeContext).find(([path]) =>
@@ -109,8 +121,8 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         </Box>
       </Toolbar>
 
-      <List aria-label="Primary navigation" sx={{ px: 1.5, py: 2 }}>
-        {navItems.map((item) => {
+      <List component="nav" aria-label="Primary navigation" sx={{ px: 1.5, py: 2 }}>
+        {[overviewItem].map((item) => {
           const selected =
             item.to === '/'
               ? location.pathname === item.to
@@ -153,6 +165,67 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
             </ListItemButton>
           )
         })}
+        {navigationSections.map((section) => (
+          <Box key={section.label} sx={{ mt: 1.75 }}>
+            <ListSubheader
+              component="div"
+              disableSticky
+              sx={{
+                px: 1.25,
+                py: 0,
+                lineHeight: 1.8,
+                bgcolor: 'transparent',
+                color: 'text.secondary',
+                fontSize: '0.6875rem',
+                fontWeight: 500,
+                letterSpacing: '0.075em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {section.label}
+            </ListSubheader>
+            {section.items.map((item) => {
+              const selected =
+                location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+              return (
+                <ListItemButton
+                  key={item.to}
+                  component={NavLink}
+                  to={item.to}
+                  selected={selected}
+                  onClick={handleCloseMobileDrawer}
+                  sx={{
+                    minHeight: 40,
+                    mb: 0.5,
+                    py: 0.75,
+                    pl: 1.25,
+                    pr: 1,
+                    borderRadius: 0.5,
+                    borderLeft: '2px solid',
+                    borderLeftColor: selected ? 'primary.main' : 'transparent',
+                    color: selected ? 'text.primary' : 'text.secondary',
+                    '&.Mui-selected': {
+                      bgcolor: ledgerTokens.hover,
+                      '&:hover': { bgcolor: ledgerTokens.hover },
+                    },
+                    '&:hover': {
+                      bgcolor: ledgerTokens.hover,
+                      color: 'text.primary',
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 32, color: 'inherit', '& svg': { fontSize: 18 } }}>
+                    {item.icon}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={item.label}
+                    primaryTypographyProps={{ fontSize: 13, fontWeight: selected ? 500 : 400 }}
+                  />
+                </ListItemButton>
+              )
+            })}
+          </Box>
+        ))}
       </List>
 
     </Box>
@@ -200,22 +273,6 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {currentContext}
             </Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Avatar
-              aria-label="Inventory Brew account"
-              sx={{
-                width: 30,
-                height: 30,
-                borderRadius: 1,
-                bgcolor: 'primary.main',
-                fontSize: 11,
-                fontWeight: 500,
-              }}
-            >
-              IB
-            </Avatar>
           </Box>
         </Toolbar>
       </AppBar>

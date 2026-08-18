@@ -46,6 +46,7 @@ export const StocktakesPage = () => {
   const [name, setName] = useState(defaultName)
   const [notes, setNotes] = useState('')
   const [starting, setStarting] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -61,7 +62,13 @@ export const StocktakesPage = () => {
         .finally(() => active && setLoading(false))
     }, 200)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [page, search])
+  }, [page, search, reloadKey])
+
+  const retryLoad = () => {
+    setLoading(true)
+    setError('')
+    setReloadKey((current) => current + 1)
+  }
 
   const closeDialog = () => {
     setOpen(false)
@@ -88,13 +95,15 @@ export const StocktakesPage = () => {
         subtitle="Count what is physically on hand, then update inventory after a quick review."
         actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setOpen(true)}>Start Stock Count</Button>}
       />
-      {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
+      {error ? <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={retryLoad}>Retry</Button>}>{error}</Alert> : null}
       <TextField
         value={search}
         onChange={(event) => { setSearch(event.target.value); setPage(1) }}
         placeholder="Search stock counts"
-        aria-label="Search stock counts"
-        slotProps={{ input: { startAdornment: <SearchRoundedIcon color="disabled" sx={{ mr: 1, fontSize: 19 }} /> } }}
+        slotProps={{
+          input: { startAdornment: <SearchRoundedIcon color="disabled" sx={{ mr: 1, fontSize: 19 }} /> },
+          htmlInput: { 'aria-label': 'Search stock counts' },
+        }}
         sx={{ width: { xs: '100%', sm: 320 }, mb: 1.5 }}
       />
       <LedgerTableContainer>
@@ -102,7 +111,7 @@ export const StocktakesPage = () => {
           <TableHead><TableRow><TableCell>Stock Count</TableCell><TableCell>Status</TableCell><TableCell>Date</TableCell><TableCell>Progress</TableCell><TableCell align="right">Difference</TableCell></TableRow></TableHead>
           <TableBody>
             {loading ? Array.from({ length: 4 }).map((_, index) => <TableRow key={index}>{Array.from({ length: 5 }).map((__, cell) => <TableCell key={cell}><Skeleton /></TableCell>)}</TableRow>) : null}
-            {!loading && items.length === 0 ? <TableRow><TableCell colSpan={5}><Box sx={{ py: 6, textAlign: 'center' }}><Typography variant="h6">No stock counts yet</Typography><Typography color="text.secondary" sx={{ mt: 0.5 }}>Start one when you are ready to check what is on hand.</Typography></Box></TableCell></TableRow> : null}
+            {!loading && !error && items.length === 0 ? <TableRow><TableCell colSpan={5}><Box sx={{ py: 6, textAlign: 'center' }}><Typography variant="h6">No stock counts yet</Typography><Typography color="text.secondary" sx={{ mt: 0.5 }}>Start one when you are ready to check what is on hand.</Typography></Box></TableCell></TableRow> : null}
             {!loading ? items.map((item) => (
               <TableRow key={item.id} hover onClick={() => navigate(`/stock-counts/${item.id}`)} sx={{ cursor: 'pointer' }}>
                 <TableCell><Typography variant="body2" sx={{ fontWeight: 500 }}>{item.name}</Typography></TableCell>
@@ -117,7 +126,7 @@ export const StocktakesPage = () => {
       </LedgerTableContainer>
       {totalPages > 1 ? <Stack alignItems="center" sx={{ mt: 2 }}><Pagination page={page} count={totalPages} onChange={(_, next) => setPage(next)} /></Stack> : null}
 
-      <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="sm">
+      <Dialog open={open} onClose={starting ? undefined : closeDialog} fullWidth maxWidth="sm">
         <DialogTitle>Start Stock Count</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -125,7 +134,7 @@ export const StocktakesPage = () => {
             <TextField label="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} multiline minRows={3} />
           </Stack>
         </DialogContent>
-        <DialogActions><Button onClick={closeDialog}>Cancel</Button><Button variant="contained" disabled={starting || !name.trim()} onClick={handleStart}>Start Stock Count</Button></DialogActions>
+        <DialogActions><Button onClick={closeDialog} disabled={starting}>Cancel</Button><Button variant="contained" disabled={starting || !name.trim()} onClick={handleStart}>{starting ? 'Starting…' : 'Start Stock Count'}</Button></DialogActions>
       </Dialog>
     </>
   )

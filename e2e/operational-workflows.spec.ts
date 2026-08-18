@@ -50,7 +50,7 @@ test('Stock Count saves across refresh and posts only its reconciliation varianc
   await page.getByRole('button', { name: 'Confirm & update inventory' }).click()
   await expect(page.getByText('Stock Count completed. Inventory is up to date.')).toBeVisible()
   await expect(page.getByText('2 items counted')).toBeVisible()
-  await expect(page.getByText('1 items had differences')).toBeVisible()
+  await expect(page.getByText('1 item had differences')).toBeVisible()
   await expect(page.getByText('Lower than expected: 1')).toBeVisible()
   await expect(page.getByText('Higher than expected: 0')).toBeVisible()
 

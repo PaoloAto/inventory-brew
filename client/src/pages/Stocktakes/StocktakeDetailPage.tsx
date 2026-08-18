@@ -79,6 +79,7 @@ export const StocktakeDetailPage = () => {
   const [message, setMessage] = useState<{ severity: 'success' | 'error' | 'warning'; text: string } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [conflicts, setConflicts] = useState<StocktakeConflict[]>([])
+  const [loadVersion, setLoadVersion] = useState(0)
   const inputRefs = useRef(new Map<string, HTMLInputElement>())
 
   useEffect(() => {
@@ -93,7 +94,13 @@ export const StocktakeDetailPage = () => {
       .catch((error: unknown) => active && setMessage({ severity: 'error', text: getErrorMessage(error, 'Could not load this stock count.') }))
       .finally(() => active && setLoading(false))
     return () => { active = false }
-  }, [id])
+  }, [id, loadVersion])
+
+  const retryLoad = () => {
+    setLoading(true)
+    setMessage(null)
+    setLoadVersion((current) => current + 1)
+  }
 
   const visibleLines = useMemo(() => {
     if (!stocktake) return []
@@ -197,7 +204,7 @@ export const StocktakeDetailPage = () => {
   }
 
   if (loading) return <Stack spacing={2}><Skeleton width={260} height={48} /><Skeleton height={12} /><Skeleton variant="rectangular" height={360} /></Stack>
-  if (!stocktake) return <><Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate('/stock-counts')}>Back to Stock Count</Button>{message ? <Alert severity="error" sx={{ mt: 2 }}>{message.text}</Alert> : null}</>
+  if (!stocktake) return <><Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate('/stock-counts')}>Back to Stock Count</Button>{message ? <Alert severity="error" sx={{ mt: 2 }} action={<Button color="inherit" size="small" onClick={retryLoad}>Retry</Button>}>{message.text}</Alert> : null}</>
 
   const readOnly = stocktake.status !== 'DRAFT'
 
@@ -210,8 +217,8 @@ export const StocktakeDetailPage = () => {
         <Box sx={{ border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', p: { xs: 2, sm: 2.5 }, mb: 2.5 }}>
           <Typography variant="h5">Stock Count completed</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 4 }} sx={{ mt: 1.5 }}>
-            <Typography><Box component="span" sx={numericSx}>{stocktake.summary.lineCount}</Box> items counted</Typography>
-            <Typography><Box component="span" sx={numericSx}>{stocktake.summary.varianceLineCount}</Box> items had differences</Typography>
+            <Typography><Box component="span" sx={numericSx}>{stocktake.summary.lineCount}</Box> {stocktake.summary.lineCount === 1 ? 'item counted' : 'items counted'}</Typography>
+            <Typography><Box component="span" sx={numericSx}>{stocktake.summary.varianceLineCount}</Box> {stocktake.summary.varianceLineCount === 1 ? 'item had differences' : 'items had differences'}</Typography>
             <Typography color="text.secondary">Lower than expected: <Box component="span" sx={numericSx}>{stocktake.summary.shortageLineCount}</Box></Typography>
             <Typography color="text.secondary">Higher than expected: <Box component="span" sx={numericSx}>{stocktake.summary.overageLineCount}</Box></Typography>
           </Stack>
@@ -254,7 +261,7 @@ export const StocktakeDetailPage = () => {
       )}
       <Stack direction={{ xs: 'column-reverse', sm: 'row' }} justifyContent="flex-end" spacing={1}>
         <Button onClick={() => setStep('counts')}>Back to counts</Button>
-        <Button variant="contained" disabled={working} onClick={handleFinish}>Confirm & update inventory</Button>
+        <Button variant="contained" disabled={working} onClick={handleFinish}>{working ? 'Updating inventory…' : 'Confirm & update inventory'}</Button>
       </Stack>
     </>
   )
@@ -264,12 +271,12 @@ export const StocktakeDetailPage = () => {
       <Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate('/stock-counts')} sx={{ mb: 2 }}>Back to Stock Count</Button>
       <LedgerPageHeader title="Stock Count" subtitle={stocktake.name} meta={stocktake.notes || undefined} />
       <Box sx={{ mb: 2.5 }}>
-        <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.75 }}><Typography variant="body2" sx={{ fontWeight: 500 }}>{countedLineCount} of {stocktake.lines.length} items counted</Typography><Typography variant="caption" color="text.secondary" sx={numericSx}>{Math.round(progress)}%</Typography></Stack>
+        <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.75 }}><Typography variant="body2" sx={{ fontWeight: 500 }}>{countedLineCount} of {stocktake.lines.length} {stocktake.lines.length === 1 ? 'item' : 'items'} counted</Typography><Typography variant="caption" color="text.secondary" sx={numericSx}>{Math.round(progress)}%</Typography></Stack>
         <LinearProgress variant="determinate" value={progress} sx={{ height: 5, bgcolor: ledgerTokens.surfaceSecondary, '& .MuiLinearProgress-bar': { bgcolor: progress === 100 ? 'success.main' : 'primary.main' } }} />
       </Box>
       {message ? <Alert severity={message.severity} onClose={() => setMessage(null)} sx={{ mb: 2 }}>{message.text}</Alert> : null}
       <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1.5} sx={{ mb: 1.5 }}>
-        <TextField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search items" aria-label="Search items" slotProps={{ input: { startAdornment: <SearchRoundedIcon color="disabled" sx={{ mr: 1, fontSize: 19 }} /> } }} sx={{ flex: 1, maxWidth: 420 }} />
+        <TextField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search items" slotProps={{ input: { startAdornment: <SearchRoundedIcon color="disabled" sx={{ mr: 1, fontSize: 19 }} /> }, htmlInput: { 'aria-label': 'Search items' } }} sx={{ flex: 1, maxWidth: 420 }} />
         <FormControlLabel control={<Checkbox checked={uncountedOnly} onChange={(event) => setUncountedOnly(event.target.checked)} />} label="Show uncounted only" />
       </Stack>
       <Box sx={{ border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
@@ -298,10 +305,10 @@ export const StocktakeDetailPage = () => {
       </Box>
       <Stack direction={{ xs: 'column-reverse', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mt: 2.5 }}>
         <Button color="error" onClick={() => setCancelOpen(true)}>Cancel stock count</Button>
-        <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1}><Button variant="outlined" disabled={working} onClick={() => handleSave(true)}>Save for later</Button><Button variant="contained" disabled={working} onClick={handleReview}>Review & finish</Button></Stack>
+        <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1}><Button variant="outlined" disabled={working} onClick={() => handleSave(true)}>{working ? 'Saving…' : 'Save for later'}</Button><Button variant="contained" disabled={working} onClick={handleReview}>{working ? 'Saving…' : 'Review & finish'}</Button></Stack>
       </Stack>
 
-      <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)}><DialogTitle>Cancel stock count?</DialogTitle><DialogContent><Typography>Your saved counts will stay in history, but inventory will not change.</Typography></DialogContent><DialogActions><Button onClick={() => setCancelOpen(false)}>Keep counting</Button><Button color="error" disabled={working} onClick={handleCancel}>Cancel stock count</Button></DialogActions></Dialog>
+      <Dialog open={cancelOpen} onClose={working ? undefined : () => setCancelOpen(false)}><DialogTitle>Cancel stock count?</DialogTitle><DialogContent><Typography>Your saved counts will stay in history, but inventory will not change.</Typography></DialogContent><DialogActions><Button onClick={() => setCancelOpen(false)} disabled={working}>Keep counting</Button><Button color="error" disabled={working} onClick={handleCancel}>{working ? 'Cancelling…' : 'Cancel stock count'}</Button></DialogActions></Dialog>
       <Dialog open={conflicts.length > 0} onClose={() => setConflicts([])} fullWidth maxWidth="sm"><DialogTitle>Inventory changed while you were counting</DialogTitle><DialogContent><Typography color="text.secondary">Some stock changed after this count started. Your saved counts were not applied.</Typography><Stack spacing={1.5} sx={{ mt: 2 }}>{conflicts.map((conflict) => <Box key={conflict.ingredientId} sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 1.5 }}><Typography sx={{ fontWeight: 500 }}>{conflict.ingredientName}</Typography><Typography variant="body2" color="text.secondary">Started: <Box component="span" color="text.primary" sx={numericSx}>{formatQuantity(conflict.expectedQuantity, conflict.unit)}</Box> · Now: <Box component="span" color="text.primary" sx={numericSx}>{conflict.currentQuantity === null ? 'Unavailable' : formatQuantity(conflict.currentQuantity, conflict.unit)}</Box></Typography></Box>)}</Stack></DialogContent><DialogActions><Button onClick={() => setConflicts([])}>Close</Button><Button variant="contained" onClick={() => navigate('/stock-counts?start=1')}>Start a new stock count</Button></DialogActions></Dialog>
     </>
   )
